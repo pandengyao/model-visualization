@@ -52,7 +52,7 @@
 - [ ] **P0-11** Docker 镜像 build（多阶段：Python backend + Next.js frontend），本地 `docker run` 通过，浏览器访问可看到 Qwen2-0.5B 3D 渲染
   - **必须记录实际镜像大小**并回填 README / 03-system-architecture.md 的「预计 1.3–2.0GB」占位
   - **告警阈值**：若实际镜像 > 2.5GB，Phase 0 验收报告必须讨论镜像拆分策略（web/api 分离 / slim torch wheel / 移除 tokenizers 多语言资源）
-- [ ] **P0-12** CI 管线最小集：前端 `pnpm lint && pnpm typecheck && pnpm test:unit`；后端 `ruff check . && mypy src/ && pytest`（对齐 02 §2.8；Phase 0 不强制覆盖率阈值，Phase 1 起强制 ≥70%/≥80%）
+- [ ] **P0-12** CI 管线最小集：前端 `pnpm lint && pnpm typecheck && pnpm test:unit`；后端 `ruff check . && mypy src/ && pytest`（对齐 02 §2.8；Phase 0 不强制覆盖率阈值，Phase 1 起强制 ≥80%）
 
 ### Phase 0 验收（DoD）
 
@@ -133,7 +133,9 @@
       if not norm_ok:
           return False
       act = (config.get("hidden_act") or config.get("activation_function") or "").lower()
-      if act not in ("silu", "swiglu", "geglu", "gelu_pytorch_tanh"):
+      # 注意：仅接受 SwiGLU/GatedMLP 家族激活；
+      # gelu_pytorch_tanh 属于 GELU 变体，不在此列（避免 LLaMA 族误判）。
+      if act not in ("silu", "swiglu", "geglu"):
           return False
       return True
   ```
@@ -144,7 +146,7 @@
 - [ ] **P1b-02** R3F `<Scene>` 主组件：`<Canvas>` + `<OrbitControls damping>` + `<Environment>` + `<EffectComposer><Bloom/></EffectComposer>`；材质默认 `MeshStandardMaterial`（ADR-003），不因性能主动降级
 - [ ] **P1b-03** `<ConfigEditor>` 浮动面板（受控组件，白名单字段见 11 §8.1）：300ms debounce + `PATCH /config` 发送 + 等待 WS `revision+=1` snapshot
 - [ ] **P1b-04** `<GPUSelector>` 下拉菜单：从 `/api/v1/gpus` 拉取 yaml 内容（11 §6.4），前端无硬编码 GPU 列表
-- [ ] **P1b-05** Provenance 徽标组件：EXACT（绿）/ INFERRED（橙+ⓘ tooltip）/ ESTIMATED（黄）在节点与侧边面板均可见（ADR-015/ADR-016）
+- [ ] **P1b-05** Provenance 徽标组件：EXACT（绿）/ INFERRED（蓝 `#3b82f6`，空心圆 + ⓘ tooltip）/ ESTIMATED（黄）在节点与侧边面板均可见（ADR-015/ADR-016；配色以 05 §视觉规范为准）
 - [ ] **P1b-06** 交互硬约束达标（ADR-012；非性能优化，属功能正确性）：
   - PATCH 端到端 **< 300ms**
   - 模块点选 / 悬停 **< 50ms**
@@ -191,7 +193,7 @@
 
 - [ ] **P2-01** 选定 Mamba-1.4B 或 ViT-B-16（选一个 Phase 1 注册表里不存在、开发者不熟的架构）
 - [ ] **P2-02** 新增 **1 个** adapter 文件（如 `backend/adapters/mamba.py` 或 `backend/adapters/vit.py`）
-- [ ] **P2-03** `backend/adapters/__init__.py` 追加 **1 行** `register(...)`
+- [ ] **P2-03** `backend/adapters/__init__.py` 追加 **1 行** `from . import <name>`（触发模块级 `@register` 装饰器）
 - [ ] **P2-04** 若前端需新 Template（如 Mamba 的 SSM 布局），新增 **1 个** template 文件（如 `frontend/src/templates/mamba.tsx`）
 - [ ] **P2-05** `frontend/src/templates/registry.ts` 追加 **1 行**
 - [ ] **P2-06** 严格验证：除 P2-02/P2-03/P2-04/P2-05 涉及文件外，**不得修改任何核心文件**（pipeline / 渲染循环 / 路由层 / 既有 adapter / 既有 template）

@@ -55,8 +55,7 @@ export interface Provenance {
 ```typescript
 /**
  * 节点粒度。v1.0 仅产出 "block"；"layer" / "op" / "tensor" 为原则 6 结构粒度预留槽位。
- * TODO(10): 09 §5.1.2 的 ModuleNode 未包含 `level` 字段；以 09 为准视为可选。
- * 本文件按 04 §4.2.2 保留为必填以约束前端，如后端尚未输出则前端按 "block" 填充。
+ * 对齐 09 §5.1.2 ModuleNode.level（已于 2026-04-25 回填）+ 04 §4.2.2。
  */
 export type ModuleLevel = 'layer' | 'block' | 'op' | 'tensor';
 
@@ -114,8 +113,7 @@ export interface HierarchyTree {
 
 /**
  * 模型图。3D 渲染、2D 拓扑、动画层、显存估算共享同一份结构。
- * TODO(10): 09 §5.1.2 的 ModuleGraph 未在根级声明 `provenance` 字段（仅提供 to_tree/to_flat 方法）；
- * 04 §4.2.2 要求根级 Provenance。以 04 为公共契约落地，后端若未提供则 pipeline 合成时补齐整图置信度。
+ * 根级 provenance 聚合整图置信度（09 §5.1.2 ModuleGraph.provenance 已于 2026-04-25 回填，对齐 04 §4.2.2）。
  */
 export interface ModuleGraph {
   readonly nodes: Record<string, ModuleNode>;
@@ -137,9 +135,7 @@ export type TemplateId = 'A' | 'B' | 'C' | 'G';
 
 /**
  * 架构画像。
- * TODO(10): 09 §5.1.2 的 ArchitectureProfile 未包含 `template_id` 字段；
- * 04 §4.2.3 显式要求 `template_id: Literal["A","B","C","G"]`。以 04 为契约落地，
- * 若 09 尚未回填请在下一轮文档同步时补齐 Pydantic。
+ * 对齐 09 §5.1.2 ArchitectureProfile.template_id（已于 2026-04-25 回填）+ 04 §4.2.3 + ADR-015。
  */
 export interface ArchitectureProfile {
   readonly model_type: string;                       // "llama" | "deepseek_v3" | "llama_moe" | ...
@@ -158,8 +154,7 @@ export interface ArchitectureProfile {
 ```typescript
 /**
  * 显存细分。v1.0 仅填前三项 + 汇总；后三项（训练版）v1.0 均为 null。
- * TODO(10): 09 §5.1.2 的 EstimateResult.memory 目前声明为 `dict`（非结构化）；
- * 04 §4.2.4 给出了结构化 `MemoryBreakdown`。以 04 为前端契约落地，09 侧需同步 Pydantic 至结构化类型。
+ * 对齐 09 §5.1.2 MemoryBreakdown（已于 2026-04-25 由 dict 升级为结构化类型）+ 04 §4.2.4。
  */
 export interface MemoryBreakdown {
   // v1.0 必填

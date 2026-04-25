@@ -43,15 +43,23 @@ class ArchitectureAdapter(Protocol):
 
 ### 1.2 注册方式
 
+每个 adapter 模块内使用 `@register` 装饰器自注册（与 Detector 注册模式统一，见 09 §5.2/ADR-014）：
+
+```python
+# backend/adapters/llama.py
+from .registry import register
+
+@register
+class LlamaAdapter:
+    ...
+```
+
 `backend/adapters/__init__.py`:
 ```python
-from .registry import register
-from .llama import LlamaAdapter
-from .deepseek_moe import DeepseekMoEAdapter
-
-register(LlamaAdapter())
-register(DeepseekMoEAdapter())
-# 新增架构 = 新建 adapters/<name>.py + 此处追加一行
+# 仅导入模块即可触发 @register 装饰器（副作用注册）
+from . import llama           # noqa: F401
+from . import deepseek_moe    # noqa: F401
+# 新增架构 = 新建 adapters/<name>.py（类上加 @register）+ 此处追加一行 import
 ```
 
 ### 1.3 验收

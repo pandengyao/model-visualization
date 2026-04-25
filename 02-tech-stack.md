@@ -59,7 +59,7 @@
 
 - **字体栈**：UI 使用系统级无衬线（`-apple-system, "Inter", "Segoe UI", sans-serif`），**数值/代码**使用等宽字体 `"JetBrains Mono", "Fira Code", monospace`。
 - **配色**：**深色模式优先**，禁止使用 Tailwind 默认灰阶（`gray-100` … `gray-900`）作为主视觉。
-  - 背景：`#06060f`（近黑深蓝）
+  - 背景：`#0b1220`（近黑冷蓝）
   - 主色：深空蓝 / 霓虹青 / 品红辉光，具备"科技感"语义。
   - 所有颜色需登记在 `tokens.ts` 并通过 Tailwind `theme.extend.colors` 暴露，避免魔法字符串。
 
@@ -201,7 +201,7 @@ mypy = ">=1.11"
 ### 2.8 测试 / Lint 工具链（对齐原则 3/5/9）
 
 **前端**：
-- **Vitest**：单元 / 集成测试；覆盖 Adapter/Template/Registry 等纯函数与 React hooks。`vitest run --coverage` 在 CI 强制 ≥ 70%（v1.0 DoD）
+- **Vitest**：单元 / 集成测试；覆盖 Adapter/Template/Registry 等纯函数与 React hooks。`vitest run --coverage` 在 CI 强制 ≥ 80%（v1.0 DoD，对齐 06 Phase 1/2 DoD）
 - **@testing-library/react**：组件测试（Provenance 徽标、Config 编辑器、GPU 选择器）
 - **Playwright**：E2E + 视觉回归；承载 07 验证矩阵 21 模型快照与 05 §5.4 视觉规范验证（36 张）
 - **ESLint + `@typescript-eslint`**：强制 `strict` + `no-floating-promises` + `no-explicit-any`

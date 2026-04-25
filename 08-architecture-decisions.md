@@ -190,7 +190,7 @@ v1.1+ 规划（超出本文档范围，见 README）
 - **上下文**: 原则 9 要求任何呈现给用户的数字/结构/箭头都必须可追溯
 - **决策**:
   - `ModuleNode` / `DataEdge` / `ArchitectureProfile` / `MemoryBreakdown` / `EstimateResult` 等**所有**对外 schema 必须携带 `Provenance = {source, confidence, caveats}`
-  - `confidence` 枚举：`EXACT` / `INFERRED` / `ESTIMATED` / `UNKNOWN`
+  - `confidence` 枚举统一为 **3 档**：`EXACT` / `INFERRED` / `ESTIMATED`（对齐 04/09/10；按原则 1 简洁性删除 `UNKNOWN`，"不确定/缺失" 语义统一通过 `caveats: list[str]` 表达，避免枚举与文本双轨）
   - HTTP 响应头必须携带 `X-Provenance-Summary: exact=<n>,inferred=<n>,estimated=<n>`
 - **替代方案**: Provenance 作为可选装饰（拒绝：违背原则 9，且与 ADR-008 取代关系冲突）
 - **后果**:

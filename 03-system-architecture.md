@@ -44,7 +44,7 @@
 │   Pipeline — 五阶段纯函数（无副作用，I/O 除外，见 09 §5.1.1）                              │
 │   ┌──── S1 parse ────┬──── S2 detect ────┬──── S3 synthesize ─┬─ S4 estimate ─┬─ S5 layout ┐
 │   │ config.json      │ ArchitectureProfile│ edges / flows      │ params/mem/   │ 2D+3D      │
-│   │ safetensors hdr  │                    │                    │ FLOPs         │ 坐标       │
+│   │ safetensors hdr  │                    │                    │ FLOPs         │ 坐标(a初/b精)│
 │   └──────────────────┴────────────────────┴────────────────────┴───────────────┴────────────┘
 │           ▲                   ▲                                      ▲                    │
 │           │                   │                                      │                    │
@@ -87,11 +87,16 @@ FastAPI Router
   ├─► S2 detect         ArchitectureAdapter Registry 选出 adapter
   │                     → ArchitectureProfile + ModuleGraph 骨架
   │
+  ├─► S5a layout(初步)   仅对 S1+S2 已得节点算初版 [x,y,z]（快，<50ms）
+  │                     ← 对齐原则 5「首屏即可交互」：无坐标前端不得渲染
+  │
   │◄── emit SSE { revision: 1, is_final: false }    ← 首屏可渲染快照
+  │                    （含 graph.nodes + hierarchy + profile.template_id
+  │                      + layout.positions 初版 + provenance；暂缺 edges/estimate）
   │
   ├─► S3 synthesize     补 edges / data-flow
   ├─► S4 estimate       params / memory / FLOPs  (MemoryEstimator Registry + GPU Catalog)
-  ├─► S5 layout         2D+3D 坐标
+  ├─► S5b layout(精修)   纳入 edges/estimate 后重算最终 [x,y,z]
   │
   └─► emit SSE { revision: 2, is_final: true }      ← 最终完整快照
 ```

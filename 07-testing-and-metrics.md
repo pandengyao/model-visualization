@@ -109,7 +109,7 @@
 - **Phase 2 DoD**：用 Mamba（SSM，无 attention）**或** ViT（无 causal mask）做一次冷启动 Adapter 接入演练；
 - 自动化脚本 `scripts/test_extension_cost.py` 验证：
   1. 新增文件数 ≤ 1（仅在 `backend/adapters/<name>.py` 新建）；
-  2. 注册改动 ≤ 1 行（仅在 `backend/adapters/__init__.py` 追加 `register(...)`）；
+  2. 注册改动 ≤ 1 行（仅在 `backend/adapters/__init__.py` 追加 `from . import <name>`，由模块内 `@register` 装饰器完成注册）；
   3. 未触动 `detect_features` / `synthesize_flows` / `compute_layout` / 路由层；
   4. 未新增 `if model_type == "..."` 分支；
   5. 该新 Adapter 对应模型能跑通冷启动 SSE 且产出合法 ModuleGraph。

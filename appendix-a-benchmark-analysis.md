@@ -106,6 +106,11 @@
 
 ## 借鉴优先级矩阵
 
+<!-- TODO: align phase numbering with 06 — 此表 "实现阶段" 列使用旧 Phase 3/4/5/6 标签，
+     当前 06 采用 Phase 0 (Tracer Bullet) / Phase 1 (1a/1b/1c/1d) / Phase 2 (扩展演练) / Phase N (性能优化)。
+     旧→新映射不是 1:1（例如旧 Phase 3 偏性能基础，可能对应新 Phase 1b 或 Phase N；
+     旧 Phase 6 分屏对比对应 Phase N 或 v1.1+），需产品/架构确认后再替换。 -->
+
 | 优先级 | 技术 | 来源 | 实现阶段 | 影响 |
 |---|---|---|---|---|
 | P0 | GPU 实例化渲染（MoE 专家网格） | Model Explorer | Phase 3 | 性能基础 |
