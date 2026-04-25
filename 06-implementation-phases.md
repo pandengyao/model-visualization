@@ -57,6 +57,11 @@
   - **必须记录实际镜像大小**并回填 README / 03-system-architecture.md 的「预计 1.3–2.0GB」占位
   - **告警阈值**：若实际镜像 > 2.5GB，Phase 0 验收报告必须讨论镜像拆分策略（web/api 分离 / slim torch wheel / 移除 tokenizers 多语言资源）
 - [ ] **P0-12** CI 管线最小集：前端 `pnpm lint && pnpm typecheck && pnpm test:unit`；后端 `ruff check . && mypy src/ && pytest`（对齐 02 §2.8；Phase 0 不强制覆盖率阈值，Phase 1 起强制 ≥80%）
+- [ ] **P0-13** `trust_remote_code=False` 降级路径验证：选取 **≥ 5 个 top-download 自定义架构模型**（如 `microsoft/Phi-3-mini-4k-instruct`、`Qwen/Qwen2-VL-7B-Instruct`、`internlm/internlm2-chat-7b`、`THUDM/chatglm3-6b`、`01-ai/Yi-VL-6B`）逐一跑通：
+  - 预期：`AutoConfig.from_pretrained(..., trust_remote_code=False)` 成功取 config.json；`AutoModel.from_pretrained(..., torch_dtype=..., device_map="meta", trust_remote_code=False)` 失败 → 自动回退到**合成图路径**（仅基于 config.json 产出 ModuleGraph，provenance=INFERRED，caveats=`["auto_map 指向远程代码，已降级为合成图"]`）
+  - 用户可见提示：UI 顶部黄色 Banner "此模型含自定义代码，已降级为配置推断模式" + 节点徽标全部显示 INFERRED
+  - DoD：5 个模型全部可正常渲染 ABCG 模板（至少落 Template G），无崩溃无空白页；至少 1 个通过合成图产出正确层数
+- [ ] **P0-14** 仓库根目录补 `CONTRIBUTING.md`（开发环境搭建最小集）：Python 3.12 + uv / Node 20 + pnpm 9；`make dev` 或等价脚本启动后端 :8000 + 前端 :3000；HF_TOKEN 配置指引（含"无 token 也可用离线 fixture"说明，对齐 07 §七(a)）；常见错误三条（meta-device 不可用 / safetensors 404 / pnpm 版本不匹配）
 
 ### Phase 0 验收（DoD）
 
@@ -75,6 +80,41 @@
 >
 > 示例模型基线：**Qwen2-0.5B**（P0 遗产） / **Llama-3-8B** / **Mixtral-8x7B** / **DeepSeek-V3** / **GPT-2**（Template G 回退验证）。
 
+### Phase 1 任务依赖图 + 工作量估算
+
+> T-shirt size：**S** = 0.5–1 天 / **M** = 1–2 天 / **L** = 3–5 天 / **XL** = > 5 天。工程师可按团队情况折算人天，文档只做量级约束。
+
+```
+Phase 1a (后端)                      Phase 1b (前端)             Phase 1c (动画)        Phase 1d (交互)
+─────────────────────                ─────────────────           ───────────────        ───────────────
+P1a-01 Adapter Protocol (S) ───┐
+P1a-02 4 Adapters (L) ─────────┼──→ P1b-01 TemplateContract+ABCG (L) ──┐
+P1a-03 Pipeline 5阶段 (L) ─────┤                                       │
+P1a-04 MemoryEstimator (M) ────┤                                       ├──→ P1c-01 AnimationLayer 基座 (M) ──┐
+P1a-05 GPU Catalog YAML (S) ───┼──→ P1b-04 GPUSelector (S)              │    P1c-02 Attention 动画 (L) ──────┤
+P1a-06 SSE 两段推送 (M) ───────┼──→ P1b-08 SSE/WS 订阅 (M)              │    P1c-03 MoE 路由动画 (M) ────────┤
+P1a-07 PATCH /config (M) ──────┼──→ P1b-03 ConfigEditor (M) ───────────┤    P1c-04 Residual 动画 (S) ───────┤
+P1a-08 WS /updates (S) ────────┘                                       │                                    │
+P1a-09 Provenance 全路径 (M) ──────→ P1b-05 Provenance 徽标 (S)         │                                    │
+                                                                        │                                    │
+                                     P1b-02 R3F Scene 主组件 (M) ───────┴───────────────────────────────────┼──→ P1d-01 点选/tooltip (S)
+                                     P1b-06 布局引擎对接 (S)                                                 ├──→ P1d-02 scrub 时间轴 (M)
+                                                                                                              └──→ P1d-03 相机切换 (S)
+
+检查点 ☑ 1a-check (P1a-01..09 完成)：后端能端到端跑通 Qwen2-0.5B 的 SSE 两段推送 + PATCH，WS 可收到 revision=3
+检查点 ☑ 1b-check (P1b-01..08 + 1a-check)：前端能渲染 Qwen2-0.5B + Llama-3-8B + Mixtral + DeepSeek-V3 + GPT-2 五个模型的 ABCG 模板
+检查点 ☑ 1c-check (P1c-01..04 + 1b-check)：三项 Stage-2 动画在 Mixtral 上可见、可暂停、可 scrub
+检查点 ☑ 1d-check (P1d-01..03 + 1c-check)：交互预算（§4.8）实测达标
+```
+
+**关键约束**
+- 1a-01/03/06 是 1b/1c/1d 的前置，必须优先完成（关键路径）
+- 1a-04/05 与 1a-06 可**并行**（无数据依赖）
+- 1a-check 与 1b-check 之间留 **1 个增量验收检查点**（非全 26 项做完才验收）
+- 同一人不得同时承接 1a 与 1b 的关键路径任务（避免串行化）
+
+---
+
 ### Phase 1a — 后端（扩展契约 + Pipeline 五阶段 + 热更新）
 
 - [ ] **P1a-01** `ArchitectureAdapter` Protocol 接口（11 §1.1）+ 显式 Registry（ADR-014；禁止 entry_points / pluggy）
@@ -82,12 +122,14 @@
 - [ ] **P1a-03** Pipeline 五阶段纯函数化（11 §9）：S1 parse_structure / S2 detect_features / S3 synthesize_flows / S4 estimate_resources / S5 compute_layout；每阶段无全局状态、无隐式 I/O
 - [ ] **P1a-04** `MemoryEstimator` Protocol + Registry + 唯一实现 `InferenceMemoryEstimator`（weights + KV cache + activations；ADR-019）
 - [ ] **P1a-05** GPU Catalog YAML（`backend/data/gpu-catalog.yaml`）：A100-40G / A100-80G / H100-80G / H200-141G / 4090-24G / 3090-24G / L40S-48G / 昇腾 910B / 昆仑芯 P800（唯一数据源，严禁代码硬编码；11 §6）
+  - **国产卡最小字段要求**：昇腾 910B / 寒武纪 MLU370 / 昆仑芯 P800/R200 至少填 `memory_gb` + `bf16_tflops` 两个关键字段（显存容量与吞吐必填，为 `InferenceMemoryEstimator` 基础计算所需）；`memory_bandwidth_gbps` / `fp8_tflops` / `nvlink_gbps` 允许 null（按 11 §6.3.1 语义走 caveats）
 - [ ] **P1a-06** `ParallelismStrategy` Protocol + **空 Registry**（ADR-020；v1.0 无任何策略实现；仅加空注册表单测防接口漂移）
 - [ ] **P1a-07** `PATCH /api/v1/stream/{org}/{repo}/config` 热更新路由（11 §8.2；后端 <200ms 预算）
 - [ ] **P1a-08** WebSocket endpoint（增量推送 ModuleGraph snapshot，`revision` 字段单调递增；对齐 ADR-018 schema 向前兼容）
 - [ ] **P1a-09** Provenance 全字段强制（ADR-016）：`ModuleNode` / `DataEdge` / `ArchitectureProfile` / `MemoryBreakdown` / `EstimateResult` 均携带 `{source, confidence ∈ {EXACT,INFERRED,ESTIMATED,UNKNOWN}, caveats}`；HTTP 响应头 `X-Provenance-Summary`
 - [ ] **P1a-10** 错误契约统一为 RFC 7807 `application/problem+json`
 - [ ] **P1a-11** 模板选择算法（整合自原 v1.0 §7b）：含 `_matches_llama_family()`（**RoPE + RMSNorm + SwiGLU/GatedMLP** 三特征齐备才走 Template A）；未识别架构 → **Template G**，**禁止默认回退 A**（ADR-015）
+  - **Qwen2 特有字段处理**：Qwen2/Qwen2.5 满足三特征落 Template A，同时需在 `ArchitectureProfile.features[]` 附加 `["sliding_window"]`（当 `config.sliding_window != null` 且 `use_sliding_window=true`）与 `["tie_word_embeddings"]`（当 `config.tie_word_embeddings=true`，影响参数量估算：embed 与 lm_head 共享不重复计数）；Template A 渲染层需读取这两个 feature 在节点 tooltip 显示对应标签，参数量估算必须正确去重 tied weights
 
   ```python
   def select_template(config: dict) -> str:

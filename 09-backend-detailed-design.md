@@ -47,9 +47,9 @@
 | 7 | ~~VLA 结构检测~~ | — | — | **v1.1+**：已迁至 parking 文件 | — |
 | 8 | ~~世界模型结构检测~~ | — | — | **v1.1+**：已迁至 parking 文件 | — |
 | 9 | **检测器/Adapter 注册机制**（可插拔，新增模型类别仅需 1 文件 + 1 注册） | P0 | 不支持 | 显式注册表 + Protocol 检查，**禁止自动发现**（对齐 ADR-014） | `[新增] services/detectors/registry.py` `adapters/registry.py` |
-| 10 | 模型结构树构建（meta-device 真实树 + config 合成树降级） | P0 | 不支持 | 双模式 + 自动降级 | `[新增] services/tree_builder.py` |
-| 11 | 参数量估算（精确统计 + config 估算双模式 + tied weights） | P0 | 不支持 | 含准确性测试 ground truth | `[新增] services/param_estimator.py` |
-| 12 | 推理数据流生成（模板选择 + FlowStep 序列 + SafeTensors 验证） | P0 | 不支持 | v1.0 实现模板 A/B/C | `[新增] services/flow_generator.py` |
+| 10 | 模型结构树构建（meta-device 真实树 + config 合成树降级） | P0 | 不支持 | 双模式 + 自动降级 | `[新增] services/pipeline/parse_structure.py` → 产出 `ModuleGraph`（§5.1.2）。旧名 `tree_builder.py` / `TreeNode` 已归一，见 §四术语表 |
+| 11 | 参数量估算（精确统计 + config 估算双模式 + tied weights） | P0 | 不支持 | 含准确性测试 ground truth | `[新增] services/pipeline/estimate_resources.py` → 产出 `EstimateResult`（§5.1.2）。旧名 `param_estimator.py` / `ParamStats` 已归一 |
+| 12 | 推理数据流生成（模板选择 + DataEdge 序列 + SafeTensors 验证） | P0 | 不支持 | v1.0 实现模板 A/B/C/G | `[新增] services/pipeline/synthesize_flows.py` → 产出 `list[DataEdge]`（§5.1.2）。旧名 `flow_generator.py` / `FlowStep` 已归一 |
 | 13 | 模型卡片信息获取（model_info + README） | P1 | 不支持 | HF Hub API 调用 | `[新增] services/model_card.py` |
 | 14 | 两层缓存（L0 内存 TTL + L1 文件 JSON + 原子写入） | P0 | 不支持 | 含并发安全 + HF 降级策略 | `[新增] cache.py` |
 | 15 | REST API 路由（6 端点 + SSE 进度推送） | P0 | 不支持 | 含错误统一格式 | `[新增] routers/model.py` `compare.py` |
@@ -93,15 +93,15 @@
 | 1 | HF 仓库文件下载 | §03 数据流, §04 §4.4 | `[新增] services/hub_client.py` | `list_repo_files()`, `async download_file()`, `download_all_metadata()` | 无 | v1.0 | M |
 | 2 | 模型框架判定 | §06 Step 1.7 模板选择 | `[新增] services/detectors/registry.py` | `detect_framework(repo_files) → "transformers" \| "diffusers" \| "unknown"` | #1 | v1.0 | S |
 | 3 | LLM 架构特征检测 | §06 Step 1.3, §06 §7b 模板选择算法 | `[新增] services/detectors/llm.py` | `detect_attention_variant()`, `detect_position_encoding()`, `detect_norm_type()`, `detect_ffn_variant()`, `compute_layer_schedule()`, `select_template()` | #1, #2, #9 | v1.0 | H |
-| 4 | MoE + MLA + 量化检测 | §06 Step 1.3 detectors, §04 §4.2.5 | `[新增] services/detectors/moe.py` `mla.py` `quantization.py` | `detect_moe() → MoEInfo`, `detect_mla() → MLAInfo`, `detect_quantization() → QuantInfo` | #1, #9 | v1.0 | M |
+| 4 | MoE + MLA + 量化检测 | §06 Step 1.3 detectors, §04 §4.2.5 | `[新增] services/detectors/moe.py` `mla.py` `quantization.py` | `detect_moe() → features["moe"]+config_summary`, `detect_mla() → features["mla"]`, `detect_quantization() → features["quantized"]`（旧名 MoEInfo/MLAInfo/QuantInfo 已归一为 `ArchitectureProfile.features[]`） | #1, #9 | v1.0 | M |
 | 5 | 全模态结构检测 | §06 Step 1.3 sub_configs | `[新增] services/detectors/multimodal.py` | `detect_vision_encoder()`, `detect_audio_encoder()`, `detect_projector_type()`, `detect_token_strategy()`, `detect_cross_modal_injection()` | #1, #2, #9 | v1.0 视觉 / v1.1 音频 | H |
 | 6 | ~~扩散模型结构检测~~ | — | — | — | — | **v1.1+**（parking） | — |
 | 7 | ~~VLA 结构检测~~ | — | — | — | — | **v1.1+**（parking） | — |
 | 8 | ~~世界模型结构检测~~ | — | — | — | — | **v1.1+**（parking） | — |
 | 9 | 显式 Adapter/检测器注册（对齐 ADR-014） | 架构设计约束 / 11 §1 | `[新增] services/detectors/registry.py` `adapters/registry.py` | `register()`, `dispatch(config)` 走 Protocol `detect()`；**禁止 entry_points/pluggy/importlib 自动发现** | 无 | v1.0 | M |
-| 10 | 模型结构树构建 | §06 Step 1.4, §04 §4.2.3 TreeNode | `[新增] services/tree_builder.py` | `load_model_meta(config) → TreeNode`, `build_synthetic_tree(config) → TreeNode`, `tree_to_text()` | #1, #22 | v1.0 | H |
-| 11 | 参数量估算 | §06 Step 1.5, §06 §7h tied weights, §04 §4.2.4 | `[新增] services/param_estimator.py` | `count_parameters(model) → ParamStats`, `estimate_params_from_config(config) → ParamStats` | #1, #10 | v1.0 | H |
-| 12a | LLM 推理数据流生成 | §06 Step 1.7 §7a-§7g | `[新增] services/flow_generator/llm.py` | `class LLMFlowGenerator(BaseFlowGenerator)`, `generate(config) → list[FlowStep]` | #1, #3, #4, #9, #22 | v1.0 | H |
+| 10 | 模型结构树构建 | §06 Step 1.4, §04 §4.2.3 ModuleGraph | `[新增] services/pipeline/parse_structure.py` | `load_model_meta(config) → ModuleGraph`, `build_synthetic_graph(config) → ModuleGraph`, `graph_to_text()`（旧名 tree_builder/TreeNode 已归一） | #1, #22 | v1.0 | H |
+| 11 | 参数量估算 | §06 Step 1.5, §06 §7h tied weights, §04 §4.2.4 | `[新增] services/pipeline/estimate_resources.py` | `count_parameters(graph) → EstimateResult`, `estimate_params_from_config(config) → EstimateResult`（旧名 param_estimator/ParamStats 已归一） | #1, #10 | v1.0 | H |
+| 12a | LLM 推理数据流生成 | §06 Step 1.7 §7a-§7g | `[新增] services/pipeline/synthesize_flows.py`（含 `llm.py` 子模块） | `class LLMFlowGenerator(BaseFlowGenerator)`, `generate(config) → list[DataEdge]`（旧名 FlowStep 已归一为 DataEdge） | #1, #3, #4, #9, #22 | v1.0 | H |
 | 12b | 多模态推理数据流生成 | §05 §5.5 阶段一多模态分支 | `[新增] services/flow_generator/multimodal.py` | `class MultimodalFlowGenerator(BaseFlowGenerator)` | #5, #12a | v1.0 视觉 / v1.1 全模态 | H |
 | 12c | ~~扩散模型数据流生成~~ | — | — | — | — | **v1.1+**（parking） | — |
 | 12d | ~~VLA 数据流生成~~ | — | — | — | — | **v1.1+**（parking） | — |
@@ -109,7 +109,7 @@
 | 13 | 模型卡片信息获取 | §06 Step 1.6, §04 §4.2.6 | `[新增] services/model_card.py` | `async fetch_model_card(model_id) → ModelCard` | #1 | v1.0 | S |
 | 14 | 两层缓存 | §06 Step 1.9, §04 §4.3 | `[新增] cache.py` | `get_cached()`, `set_cached()`, `safe_write_cache()`, HF 降级策略 | 无 | v1.0 | M |
 | 15 | REST API 路由 | §04 §4.1 六端点 + §04 §4.5 SSE | `[新增] routers/model.py` `compare.py` | 6 个端点 + SSE progress 端点 | #14, #16, #17 | v1.0 | M |
-| 16 | Pydantic 响应模型 | §04 §4.2 全部 Schema | `[新增] models/schemas.py` | `ModelVisualization`, `TreeNode`, `FlowStep`, `ParamStats`, `MoEInfo`, `MLAInfo`, `QuantInfo` 等 11+ 类 | 无 | v1.0 | M |
+| 16 | Pydantic 响应模型 | §04 §4.2 全部 Schema | `[新增] models/schemas.py` | `ModuleGraph` / `ModuleNode` / `DataEdge` / `HierarchyTree` / `ArchitectureProfile` / `MemoryBreakdown` / `EstimateResult` / `LayoutResult` / `Provenance` 等（旧 TreeNode/FlowStep/ParamStats/MoEInfo/MLAInfo/QuantInfo/KeyConfig 已归一，见 §四术语表） | 无 | v1.0 | M |
 | 17 | 安全规则 | §04 §4.4, §04 §4.12 | `[新增] main.py` `middleware/security.py` | `validate_model_id()`, `trust_remote_code=False` 默认警告；**v1.0 不启用 rate limit**（不引入 slowapi，对齐原则 1 与 04 §4.12；RATE_LIMITED 错误码不产出） | 无 | v1.0 | S |
 | 18 | GPU 显存估算 | 新增（参考 megatron_memory_estimator） | `[新增] services/memory_estimator.py` | `class MegatronEstimator(BaseEstimator)`, `class FSDPEstimator(BaseEstimator)`, `class InferenceEstimator(BaseEstimator)` | #1, #11 | v1.0 | H |
 | 19 | ~~并行策略计算引擎~~ | — | — | — | — | **v1.1+**（parking，v1.0 仅定义接口空实现，见 §5.1.15） | — |

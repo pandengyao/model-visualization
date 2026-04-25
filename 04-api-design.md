@@ -373,6 +373,37 @@ WS /api/v1/stream/{org}/{repo}/updates?session_id={uuid}
 
 **资源上限（v1.0）**：单实例 ≤ 100 并发 session；超出返回 503。session 状态仅存内存（不引入 Redis，对齐原则 1）。
 
+#### 4.7.2 Revision 竞态处理规则（SSE × WebSocket × PATCH）
+
+> 对齐原则 3「结构正确」+ 原则 5「首屏可交互」。revision=1 / 2 / ≥3 分别对应 SSE Phase A / SSE Phase B / PATCH 热更新（见 10 §Revision 类型）。以下规则覆盖所有交叉时序。
+
+**T1. revision 全局单调**
+- 同一 session 的 SSE / WS 消息共享一个 revision 计数器，严格单调递增
+- 前端维护 `lastAppliedRevision`；收到 revision ≤ 本地最大 → 丢弃（§4.7.1 已定义）
+
+**T2. 用户在 revision=1 与 revision=2 之间发起 PATCH**
+- 前端侧：按 §4.5.2 contract，revision=1 期间 `<ConfigEditor>` / `<GPUSelector>` **禁用**，PATCH 不可能被触发。用户意向落盘到 `Last-User-Intent`（localStorage + WS `client_hello`），revision=2 到达后自动合并发起一次 PATCH
+- 后端侧：若客户端仍绕过 UI 发出 PATCH（手工 curl），服务端返回 `409 Conflict`，问题码 `SNAPSHOT_NOT_READY`，body `{detail: "wait for revision>=2"}`
+
+**T3. Phase B 加载（S3/S4/S5b）期间收到 PATCH**
+- 后端策略：**不取消**正在进行的 Phase B；让 Phase B 正常完成并推 revision=2，然后在同一任务队列**串行**处理 PATCH 产生 revision=3
+- 理由：取消 Phase B 会丢失已付出的计算（detect/estimate 结果），重算反而更慢；串行策略保证每个 revision 都是完整快照（对齐 §4.5 "段即完整快照"）
+- 用户可见性：PATCH 的 HTTP 202 响应包含 `estimated_wait_ms`（= 当前 Phase B 剩余预估时间 + PATCH 自身预算），前端据此显示 loading spinner 预期时长
+
+**T4. 快速连续多次 PATCH 的去重/排队**
+- 前端：300ms debounce（05 §5.7 #6）在 UI 层合并为单次 HTTP 请求；debounce 期内字段覆盖式更新（非累积 diff）
+- 后端：若前一个 PATCH 的 WS 推送尚未完成，后一个 PATCH 到达时**丢弃前一个的 pending 计算**（尚未产出 revision 的那个）并仅处理最新的；已产生 revision 的历史任务不回滚。确保 WS 侧 revision 序列不出现 "PATCH-A (revision=3) → PATCH-B (revision=4) → PATCH-A 迟到的 revision=3 覆盖" 这种竞态
+- 实现：后端维护 `session_id → current_patch_task` 单槽位，新 PATCH 替换时调用 `asyncio.Task.cancel()` 取消旧任务；被取消任务的 revision 号作废（不下发）
+
+**T5. PATCH 的 revision 语义**
+- PATCH 总是基于**最新已下发**的 snapshot（revision=2 或更高），不基于 revision=1 的不完整数据
+- 若 Phase B 尚未完成 → 按 T3 串行等待；前端不应感知底层是 1 还是 2，因 UI 已禁用 PATCH 入口
+
+**T6. 断连期间的 PATCH**
+- WS 断开时前端队列不发 PATCH；按 §4.7.1 指数退避重连；连接恢复后，若本地有 pending 的意向字段，重新发起一次 PATCH
+
+---
+
 ### 4.8 交互响应预算（硬约束，Phase 1 起必达）
 
 > 对齐 README 原则 5 例外条款与 11 §8.3。交互延迟属功能正确性，不因"前期不做性能优化"而豁免。

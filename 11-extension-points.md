@@ -157,22 +157,51 @@ class ParallelismStrategy(Protocol):
 
 ```python
 class MemoryEstimator(Protocol):
-    id: Literal["megatron_tp_pp_sp", "fsdp_zero1", "fsdp_zero2", "fsdp_zero3", ...]
+    id: Literal["inference_v1", "megatron_tp_pp_sp", "fsdp_zero1", "fsdp_zero2", "fsdp_zero3", ...]
 
     def estimate(
         self,
         graph: ModuleGraph,
-        config: TrainingConfig,   # batch / seq_len / dtype / optimizer / grad_accum / ckpt
-        parallelism: ParallelismPlan,
-        gpu: GPUSpec,             # 来自 gpu-catalog.yaml
+        config: EstimateConfig,           # 见 5.1.1；v1.0=InferenceConfig，v1.1+=TrainingConfig
+        gpu: GPUSpec,                     # 来自 gpu-catalog.yaml
+        parallelism: ParallelismPlan | None = None,   # v1.0 恒传 None；v1.1+ 起接入
     ) -> MemoryBreakdown:
-        """返回按类别（weights / gradients / optimizer_states / activations / kv_cache / comm_buffer）
+        """返回按类别（weights / kv_cache / activations [ / gradients / optimizer_states / comm_buffer]）
         的 per-device 显存消耗 + 总量 + 与 GPU 容量的占比。"""
 ```
 
+#### 5.1.1 EstimateConfig 家族（v1.0 推理 vs v1.1+ 训练）
+
+```python
+# v1.0 唯一支持的配置类型
+class InferenceConfig(BaseModel):
+    batch_size: int
+    seq_len: int
+    dtype: Literal["float16", "bfloat16", "float32", "int8", "int4"]
+    # kv_cache_enabled: bool = True  # v1.0 默认 True
+    # v1.0 不含 optimizer / grad_accum / ckpt 字段
+
+# v1.1+ 训练版（parking）
+class TrainingConfig(InferenceConfig):
+    optimizer: Literal["adamw", "sgd", "lion"]
+    grad_accum_steps: int
+    activation_checkpointing: bool
+    ...
+
+EstimateConfig = InferenceConfig | TrainingConfig
+```
+
+#### 5.1.2 v1.0 调用约定（唯一实现：`InferenceMemoryEstimator`）
+
+- `id = "inference_v1"`
+- `config` 必须为 `InferenceConfig` 实例；传入 `TrainingConfig` → 抛 `NotImplementedError("训练版显存 v1.1+")`
+- `parallelism` 必须传 `None`；非 None → 抛 `NotImplementedError("并行策略 v1.2+")`
+- 产出 `MemoryBreakdown` 仅填 `weights_bytes / kv_cache_bytes / activations_bytes + 汇总`；`gradients_bytes / optimizer_states_bytes / comm_buffer_bytes` 一律 `None`
+- 对齐 09 §5.1.2 + 04 §4.2.4 + ADR-019
+
 ### 5.2 v1.x 必须支持
-- `megatron_tp_pp_sp`（Megatron-LM 3D parallelism，含 SP 激活切分）
-- `fsdp_zero1` / `fsdp_zero2` / `fsdp_zero3`（PyTorch FSDP）
+- v1.0：`inference_v1`（唯一实现）
+- v1.1+ parking：`megatron_tp_pp_sp`（Megatron-LM 3D parallelism，含 SP 激活切分）/ `fsdp_zero1` / `fsdp_zero2` / `fsdp_zero3`
 
 ---
 

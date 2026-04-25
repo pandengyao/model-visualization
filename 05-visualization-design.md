@@ -525,4 +525,26 @@ if (!document.createElement('canvas').getContext('webgl2')) {
 
 ---
 
+## 5.12 前端错误处理规范（对齐 04 ProblemDetails + 10 ErrorCode）
+
+> 对齐原则 3 "结构正确" + 原则 9 "可追溯"：错误不能静默，必须让用户理解发生了什么以及下一步可做什么。
+
+| ErrorCode | HTTP | 场景 | UI 形态 | 用户下一步 |
+|---|---|---|---|---|
+| `MODEL_NOT_FOUND` | 404 | 模型 repo 不存在或拼写错 | **全屏错误页**：大图标 + "未找到 {repo_id}"；副标题显示 `problem.detail`；底部三个按钮：返回首页 / 查看示例模型 / 报告问题 | 改输入重新导航 |
+| `HUB_UNAVAILABLE` | 503 | HF Hub 网络失败 / 超时 | **顶部红色 Banner**（不替换主场景）+ 显示"已缓存版本"按钮；若无缓存 → 全屏错误页 | 点击"重试"（5s 冷却） / 切离线 fixture 提示 |
+| `META_LOAD_TIMEOUT` | 504 | meta-device 加载超时（通常 > 30s） | **全屏错误页** + "降级为合成图"按钮；Provenance 徽标切换为 INFERRED | 降级继续（合成图可渲染结构） / 重试真实加载 |
+| `TRUST_REMOTE_CODE_BLOCKED` | 422 | 模型含 auto_map 且 trust_remote_code=False | **顶部黄色 Banner**（场景已渲染 Template G 合成图）+ caveats 显示"自定义代码已拒绝，图为 config 推断" | 用户可接受降级继续浏览 |
+| `SCHEMA_VALIDATION_FAILED` | 500 | 后端产出不符 Pydantic 契约 | **全屏错误页** + 折叠区显示 `problem.detail` 与 traceId | 上报 issue（一键拷贝 traceId） |
+| `SESSION_EXPIRED` | 410 | SSE/WS session 超时（§4.7.1） | **Toast** "会话已过期，正在重建…" 自动重发 GET /stream；失败则升级全屏错误 | 无需操作（自动恢复） |
+| `RATE_LIMITED` | 429 | v1.0 不启用，仅占位 | — | — |
+
+**通用规则**：
+- 所有错误页顶部固定显示 `traceId` 的末 8 位（后端必在响应头 `X-Trace-Id` 返回）+ 一键拷贝，方便上报
+- 错误页配色参照 §5.4（深色背景 + 玫瑰金辅助色），不因错误破坏精美感（对齐原则 2）
+- Toast 最多同时 3 个，多余进队列；Toast 默认 5s，含"详情"按钮可展开
+- 全屏错误页**必须**提供"返回首页"按钮（防止用户卡死）
+
+---
+
 [← 返回目录](README.md)

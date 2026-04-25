@@ -403,14 +403,16 @@ export type AnimationLayerId =
   | 'L4_parallelism';
 
 /**
- * 共享时间轴上下文。gsap Timeline 类型由运行时 import 提供（此处用 unknown 避免
- * 本文件对 gsap 产生强依赖；使用方应 `import type { gsap } from 'gsap'` 后做 cast）。
+ * 共享时间轴上下文。
+ * 默认 `TTimeline = import('gsap').core.Timeline`；使用方在 import gsap 后以
+ * `AnimationContext<gsap.core.Timeline>` 获得完整类型安全，无需 `as` 断言。
+ * 不 import gsap 的场景（例如 SSR/测试桩）可回落到 unknown。
  */
-export interface AnimationContext {
-  readonly master: unknown;                          // gsap.core.Timeline
+export interface AnimationContext<TTimeline = unknown> {
+  readonly master: TTimeline;
   readonly layers: Record<AnimationLayerId, {
     readonly enabled: boolean;
-    readonly sub: unknown;                           // gsap.core.Timeline
+    readonly sub: TTimeline;
   }>;
   readonly graph: ModuleGraph;                       // PATCH /config 后重新注入
   readonly now: number;                              // 秒
