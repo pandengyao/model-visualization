@@ -2,6 +2,8 @@
 
 > HuggingFace 模型结构 3D 交互式可视化 Web 服务 — 后端模块详细设计 | v1.0
 
+> **v1.0 范围声明**：本文档仅记录 v1.0 交付范围的后端详细设计。v1.1+ 候选内容已迁至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)。
+
 > **文档权威性（2026-04-25 归一）**：
 > - 本文档是**后端实现的权威源**（pipeline 细节、缓存实现、错误处理内部流程）。
 > - **扩展点契约**（Adapter / Template / AnimationLayer / ParallelismStrategy / MemoryEstimator / GPU Catalog / DataFlowDirection / ConfigEdit / Pipeline 签名与注册机制）以 [11-extension-points.md](11-extension-points.md) 为准，与 11 冲突时以 11 为准。
@@ -38,13 +40,13 @@
 |---|-------|-------|---------|------|---------|
 | 1 | 下载并解析 HF 模型配置（config.json / model_index.json） | P0 | 不支持 | 需实现 async 下载 + 框架判定 + AutoConfig 加载 | `[新增] services/config_parser.py` |
 | 2 | 模型框架判定（transformers / diffusers / 其他） | P0 | 不支持 | 需作为所有后续检测的入口分发 | `[新增] services/detectors/registry.py` |
-| 3 | LLM 架构特征检测（注意力变体 / 位置编码 / 归一化 / FFN 变体 / 逐层调度 / tied weights / 模板分类 A-G） | P0 | 不支持 | 7 模板覆盖 95%+ transformers 模型 | `[新增] services/detectors/llm.py` |
+| 3 | LLM 架构特征检测（注意力变体 / 位置编码 / 归一化 / FFN 变体 / 逐层调度 / tied weights / 模板分类 A/B/C/G） | P0 | 不支持 | 需实现 | 4 模板覆盖 v1.0 目标架构（A=LLaMA 族，B=LLaMA-MoE，C=DeepSeek-MoE，G=通用回退，对齐 ADR-015） | `[新增] services/detectors/llm.py` |
 | 4 | MoE + MLA + 量化检测 | P0 | 不支持 | 含 DeepSeek-MoE 共享专家 + MLA 压缩维度 + 多量化格式 | `[新增] services/detectors/moe.py` `mla.py` `quantization.py` |
 | 5 | 全模态结构检测（视觉/音频编码器、投影器、token 策略、跨模态注入） | P0 | 不支持 | 视觉 v1.0 基础支持，音频 v1.1 | `[新增] services/detectors/multimodal.py` |
-| 6 | 扩散模型结构检测（UNet/DiT、VAE、文本编码器、调度器、ControlNet） | P1 | 不支持 | diffusers 模型解析链路独立于 transformers | `[新增] services/detectors/diffusion.py` |
-| 7 | VLA 结构检测（动作头、本体感知编码器、动作 tokenizer） | P1 | 不支持 | 新兴架构，需灵活适配 | `[新增] services/detectors/vla.py` |
-| 8 | 世界模型结构检测（帧编码器、动力学模型、时序建模、动作条件注入） | P1 | 不支持 | 新兴架构，需灵活适配 | `[新增] services/detectors/world_model.py` |
-| 9 | **检测器注册机制**（可插拔，新增模型类别无需改动主流程） | P0 | 不支持 | 注册表 + 自动发现，预留扩展点 | `[新增] services/detectors/registry.py` |
+| 6 | ~~扩散模型结构检测~~ | — | — | **v1.1+**：已迁至 parking 文件 | — |
+| 7 | ~~VLA 结构检测~~ | — | — | **v1.1+**：已迁至 parking 文件 | — |
+| 8 | ~~世界模型结构检测~~ | — | — | **v1.1+**：已迁至 parking 文件 | — |
+| 9 | **检测器/Adapter 注册机制**（可插拔，新增模型类别仅需 1 文件 + 1 注册） | P0 | 不支持 | 显式注册表 + Protocol 检查，**禁止自动发现**（对齐 ADR-014） | `[新增] services/detectors/registry.py` `adapters/registry.py` |
 | 10 | 模型结构树构建（meta-device 真实树 + config 合成树降级） | P0 | 不支持 | 双模式 + 自动降级 | `[新增] services/tree_builder.py` |
 | 11 | 参数量估算（精确统计 + config 估算双模式 + tied weights） | P0 | 不支持 | 含准确性测试 ground truth | `[新增] services/param_estimator.py` |
 | 12 | 推理数据流生成（模板选择 + FlowStep 序列 + SafeTensors 验证） | P0 | 不支持 | v1.0 实现模板 A/B/C | `[新增] services/flow_generator.py` |
@@ -52,13 +54,13 @@
 | 14 | 两层缓存（L0 内存 TTL + L1 文件 JSON + 原子写入） | P0 | 不支持 | 含并发安全 + HF 降级策略 | `[新增] cache.py` |
 | 15 | REST API 路由（6 端点 + SSE 进度推送） | P0 | 不支持 | 含错误统一格式 | `[新增] routers/model.py` `compare.py` |
 | 16 | Pydantic 响应模型（11+ Schema 类） | P0 | 不支持 | 前后端契约 | `[新增] models/schemas.py` |
-| 17 | 安全规则（model_id 校验 + Rate limit + trust_remote_code 隔离） | P1 | 不支持 | slowapi 限流 + 正则校验 | `[新增] main.py` |
+| 17 | 安全规则（model_id 校验 + trust_remote_code 警告） | P1 | 不支持 | `validate_model_id()` + `trust_remote_code=False` 默认隔离；**v1.0 不启用 rate limit**（对齐原则 1 与 04 §4.12，不引入 slowapi） | `[新增] main.py` |
 
 | 18 | GPU 显存估算（推理 + 训练双模式，支持 Megatron 和 FSDP 两种并行框架） | P0 | 不支持 | 含 Megatron（TP/PP/DP/CP/EP）和 FSDP（Full/Grad/No Shard）两种框架，推理含 KV Cache 和量化感知 | `[新增] services/memory_estimator.py` |
 | 19 | 并行策略计算引擎（Device Mesh / TP 切分 / PP 调度 / DP 梯度同步 / 通信量估算） | P1 | 不支持 | 覆盖 Megatron-style 全并行维度 | `[新增] services/parallel_engine.py` |
 | 20 | 训练数据流生成（宏观 pipeline 调度 + 并行通信 + 梯度累积） | P1 | 不支持 | PP 1F1B 时序、DP 梯度同步、梯度累积 | `[新增] services/training_flow_generator.py` |
 | 21 | 层内前向/反向数据流生成（单层内部的计算步骤和梯度回传路径） | P1 | 不支持 | 覆盖所有模型类别的层内 forward/backward 细节 | `[新增] services/flow_generator/backward.py` |
-| 22 | transformers 模型结构源码解析（解析 `modeling_*.py` 中的类层级、`forward()` 调用链、模块注册关系，作为结构树/数据流/并行策略的 ground truth） | P0 | 不支持 | AST 解析 + meta-device 实例化双路径 | `[新增] services/model_inspector.py` |
+| 22 | ~~transformers 模型结构源码解析（AST 解析）~~ | — | — | **v1.1+**：已迁至 parking 文件。v1.0 以 meta-device + safetensors 为 ground truth | — |
 
 ### 架构设计约束：面向变化的能力
 
@@ -68,7 +70,7 @@
 | **新并行策略** | 如 ZeRO++、Tensor+Sequence 混合新范式 | 并行引擎（#19）策略可插拔，通信原语抽象为接口 |
 | **新量化方法** | 如 FP4、新的量化库 | 量化检测器（#4）按 method 注册，与核心逻辑解耦 |
 | **新模态** | 如触觉、3D 点云、视频理解 | 模态检测器（#5）可插拔，子配置解析泛化 |
-| **新模型类别** | 超出当前 7 类的全新范式 | 框架判定（#2）设兜底分支 + 手动注册入口 |
+| **新模型类别** | 超出 v1.0 四类模板（A/B/C/G）的全新范式 | 框架判定（#2）设兜底分支 + 手动注册入口，未识别一律走 Template G（对齐 ADR-015，原则 8） |
 | **transformers 内部重构** | modeling 文件结构/命名变化 | 模型源码解析（#22）基于 AST/反射而非硬编码路径 |
 | **HF Hub API 变更** | 新的文件格式、API 版本 | 文件下载（#1）抽象为适配层，隔离 HF SDK 细节 |
 | **训练框架演进** | Megatron/FSDP 之外的新框架（如 DeepSpeed Ulysses） | 显存估算（#18）和训练流（#20）按框架注册，公式可配置 |
@@ -93,27 +95,27 @@
 | 3 | LLM 架构特征检测 | §06 Step 1.3, §06 §7b 模板选择算法 | `[新增] services/detectors/llm.py` | `detect_attention_variant()`, `detect_position_encoding()`, `detect_norm_type()`, `detect_ffn_variant()`, `compute_layer_schedule()`, `select_template()` | #1, #2, #9 | v1.0 | H |
 | 4 | MoE + MLA + 量化检测 | §06 Step 1.3 detectors, §04 §4.2.5 | `[新增] services/detectors/moe.py` `mla.py` `quantization.py` | `detect_moe() → MoEInfo`, `detect_mla() → MLAInfo`, `detect_quantization() → QuantInfo` | #1, #9 | v1.0 | M |
 | 5 | 全模态结构检测 | §06 Step 1.3 sub_configs | `[新增] services/detectors/multimodal.py` | `detect_vision_encoder()`, `detect_audio_encoder()`, `detect_projector_type()`, `detect_token_strategy()`, `detect_cross_modal_injection()` | #1, #2, #9 | v1.0 视觉 / v1.1 音频 | H |
-| 6 | 扩散模型结构检测 | 新增（PRD 未覆盖） | `[新增] services/detectors/diffusion.py` | `detect_denoiser_type()`, `detect_vae()`, `detect_text_encoders()`, `detect_scheduler()`, `detect_controlnet()` | #1, #2, #9 | v1.1 | H |
-| 7 | VLA 结构检测 | 新增 | `[新增] services/detectors/vla.py` | `detect_action_head()`, `detect_proprio_encoder()`, `detect_action_tokenizer()` | #1, #2, #9 | v1.1 | M |
-| 8 | 世界模型结构检测 | 新增 | `[新增] services/detectors/world_model.py` | `detect_frame_encoder()`, `detect_dynamics_model()`, `detect_temporal_modeling()` | #1, #2, #9 | v1.1 | M |
-| 9 | 检测器注册机制 | 架构设计约束 | `[新增] services/detectors/registry.py` | `class DetectorRegistry`, `register()`, `detect_all(config, files) → DetectionResult` | 无 | v1.0 | M |
+| 6 | ~~扩散模型结构检测~~ | — | — | — | — | **v1.1+**（parking） | — |
+| 7 | ~~VLA 结构检测~~ | — | — | — | — | **v1.1+**（parking） | — |
+| 8 | ~~世界模型结构检测~~ | — | — | — | — | **v1.1+**（parking） | — |
+| 9 | 显式 Adapter/检测器注册（对齐 ADR-014） | 架构设计约束 / 11 §1 | `[新增] services/detectors/registry.py` `adapters/registry.py` | `register()`, `dispatch(config)` 走 Protocol `detect()`；**禁止 entry_points/pluggy/importlib 自动发现** | 无 | v1.0 | M |
 | 10 | 模型结构树构建 | §06 Step 1.4, §04 §4.2.3 TreeNode | `[新增] services/tree_builder.py` | `load_model_meta(config) → TreeNode`, `build_synthetic_tree(config) → TreeNode`, `tree_to_text()` | #1, #22 | v1.0 | H |
 | 11 | 参数量估算 | §06 Step 1.5, §06 §7h tied weights, §04 §4.2.4 | `[新增] services/param_estimator.py` | `count_parameters(model) → ParamStats`, `estimate_params_from_config(config) → ParamStats` | #1, #10 | v1.0 | H |
 | 12a | LLM 推理数据流生成 | §06 Step 1.7 §7a-§7g | `[新增] services/flow_generator/llm.py` | `class LLMFlowGenerator(BaseFlowGenerator)`, `generate(config) → list[FlowStep]` | #1, #3, #4, #9, #22 | v1.0 | H |
 | 12b | 多模态推理数据流生成 | §05 §5.5 阶段一多模态分支 | `[新增] services/flow_generator/multimodal.py` | `class MultimodalFlowGenerator(BaseFlowGenerator)` | #5, #12a | v1.0 视觉 / v1.1 全模态 | H |
-| 12c | 扩散模型数据流生成 | 新增 | `[新增] services/flow_generator/diffusion.py` | `class DiffusionFlowGenerator(BaseFlowGenerator)` | #6 | v1.1 | H |
-| 12d | VLA 数据流生成 | 新增 | `[新增] services/flow_generator/vla.py` | `class VLAFlowGenerator(BaseFlowGenerator)` | #7 | v1.1 | M |
-| 12e | 世界模型数据流生成 | 新增 | `[新增] services/flow_generator/world_model.py` | `class WorldModelFlowGenerator(BaseFlowGenerator)` | #8 | v1.1 | M |
+| 12c | ~~扩散模型数据流生成~~ | — | — | — | — | **v1.1+**（parking） | — |
+| 12d | ~~VLA 数据流生成~~ | — | — | — | — | **v1.1+**（parking） | — |
+| 12e | ~~世界模型数据流生成~~ | — | — | — | — | **v1.1+**（parking） | — |
 | 13 | 模型卡片信息获取 | §06 Step 1.6, §04 §4.2.6 | `[新增] services/model_card.py` | `async fetch_model_card(model_id) → ModelCard` | #1 | v1.0 | S |
 | 14 | 两层缓存 | §06 Step 1.9, §04 §4.3 | `[新增] cache.py` | `get_cached()`, `set_cached()`, `safe_write_cache()`, HF 降级策略 | 无 | v1.0 | M |
 | 15 | REST API 路由 | §04 §4.1 六端点 + §04 §4.5 SSE | `[新增] routers/model.py` `compare.py` | 6 个端点 + SSE progress 端点 | #14, #16, #17 | v1.0 | M |
 | 16 | Pydantic 响应模型 | §04 §4.2 全部 Schema | `[新增] models/schemas.py` | `ModelVisualization`, `TreeNode`, `FlowStep`, `ParamStats`, `MoEInfo`, `MLAInfo`, `QuantInfo` 等 11+ 类 | 无 | v1.0 | M |
-| 17 | 安全规则 | §04 §4.4 | `[新增] main.py` `middleware/security.py` | `validate_model_id()`, slowapi RateLimiter, trust_remote_code 警告 | 无 | v1.0 | S |
+| 17 | 安全规则 | §04 §4.4, §04 §4.12 | `[新增] main.py` `middleware/security.py` | `validate_model_id()`, `trust_remote_code=False` 默认警告；**v1.0 不启用 rate limit**（不引入 slowapi，对齐原则 1 与 04 §4.12；RATE_LIMITED 错误码不产出） | 无 | v1.0 | S |
 | 18 | GPU 显存估算 | 新增（参考 megatron_memory_estimator） | `[新增] services/memory_estimator.py` | `class MegatronEstimator(BaseEstimator)`, `class FSDPEstimator(BaseEstimator)`, `class InferenceEstimator(BaseEstimator)` | #1, #11 | v1.0 | H |
-| 19 | 并行策略计算引擎 | §并行可视化设计 §10.1-§10.7 | `[新增] services/parallel_engine.py` | `compute_device_mesh()`, `compute_tp_sharding()`, `compute_pp_schedule()`, `estimate_comm_volume()` | #1, #3, #22 | v1.1 | H |
-| 20 | 训练数据流生成（宏观） | §并行可视化设计 §10.8 A-F | `[新增] services/training_flow_generator.py` | `generate_training_step_flow()`, `generate_pp_schedule()`, `generate_grad_sync_flow()` | #12a, #19 | v1.1 | H |
-| 21 | 层内前向/反向数据流生成 | §并行可视化设计 §10.8 E | `[新增] services/flow_generator/backward.py` | `generate_backward_flow(forward_steps) → list[FlowStep]`，覆盖所有模型类别 | #12a-e, #22 | v1.1 | H |
-| 22 | transformers 模型结构源码解析 | 架构设计约束 | `[新增] services/model_inspector.py` | `inspect_model_class(config) → ModuleHierarchy`, `extract_forward_chain()`, `map_parallel_points()` | #1 | v1.0 | H |
+| 19 | ~~并行策略计算引擎~~ | — | — | — | — | **v1.1+**（parking，v1.0 仅定义接口空实现，见 §5.1.15） | — |
+| 20 | ~~训练数据流生成（宏观）~~ | — | — | — | — | **v1.1+**（parking） | — |
+| 21 | ~~层内前向/反向数据流生成~~ | — | — | — | — | **v1.1+**（parking） | — |
+| 22 | ~~transformers 模型结构源码解析（AST）~~ | — | — | — | — | **v1.1+**（parking）。v1.0 以 meta-device + safetensors 为 ground truth | — |
 
 ---
 
@@ -151,7 +153,7 @@
 | 模型结构树（Model Tree） | 从 transformers `modeling_*.py` 获取的 100% 精确模块层级树。主路径通过 meta-device 实例化获取，降级路径通过 AST 源码解析获取，两者结果一致 | `[新增] services/tree_builder.py` |
 | 源码解析（Source Parsing） | 对 `modeling_*.py` 进行 AST 分析，提取 `__init__` 模块注册关系和 `forward()` 调用链，作为 meta-device 加载失败时的降级方案 | `[新增] services/model_inspector.py` |
 | FlowStep | 数据流的最小单元，描述一个计算步骤（模块路径、输入/输出 shape、计算描述），支持递归嵌套 sub_steps | `[新增] models/schemas.py#FlowStep` |
-| 架构模板（Template A-G） | 按模型架构特征分类的 7 种数据流生成模板（A=LLaMA Decoder, B=LLaMA-MoE, C=DeepSeek-MoE, D=GPT-2, E=Hybrid Mamba, F=Encoder-Decoder, G=Multimodal VLM） | `[新增] services/flow_generator/` |
+| 架构模板（Template A/B/C/G） | 按模型架构特征分类的 v1.0 四种数据流生成模板（A=LLaMA Decoder, B=LLaMA-MoE, C=DeepSeek-MoE, G=通用回退）。对齐 ADR-015，未识别架构一律走 Template G，**不得**默认回退至 A（原则 8）。其他历史模板（D/E/F）已迁至 v1.1+ parking 文件 | `[新增] services/flow_generator/` |
 | 检测器注册表 | 可插拔的架构特征检测机制，每个检测器实现 `BaseDetector` 接口并注册到全局表，主流程按表遍历执行 | `[新增] services/detectors/registry.py` |
 | Config Patch | 用户对模型 config 的局部修改（JSON Patch 格式），作为增量重算的输入 | `[新增] services/config_mutator.py` |
 | 增量重算（Incremental Recompute） | 基于字段→计算模块依赖图的脏标记传播机制，config 变更仅触发受影响模块重新计算 | `[新增] services/incremental_engine.py` |
@@ -421,9 +423,11 @@ class MoEDetector(FeatureDetector):
 | VisionDetector | 视觉编码器 | vision_config, image_size |
 | AudioDetector | 音频编码器 | audio_config |
 | CrossAttentionDetector | 交叉注意力 | cross_attention 类名/配置 |
-| DiffusionDetector | 扩散模型 | model_index.json, scheduler_config |
-| VLADetector | VLA 架构 | action_head, robot_config |
 | TiedWeightsDetector | 权重共享 | tie_word_embeddings, id(p) 去重 |
+
+> **v1.0 Adapter/Detector 注册规则（对齐 ADR-014）**：所有 Adapter/Detector 必须通过 `register(...)` 显式调用注册；**禁止** `entry_points` / `pluggy` / `importlib` 自动发现。Protocol 检查在 `dispatch()` 内按注册顺序遍历执行，未命中时兜底 Template G。
+>
+> v1.1+ 候选：DiffusionDetector / VLADetector / WorldModelDetector / SSMDetector（Mamba 类）详细需求参见 parking 文件。
 
 ### 5.1.6 准入控制与进程隔离
 
@@ -588,8 +592,8 @@ backend/app/
 │   │   └── merger.py               # 多层结果合并 + Provenance 标记
 │   │
 │   ├── detectors/
-│   │   ├── registry.py             # 装饰器注册表
-│   │   ├── base.py                 # FeatureDetector ABC
+│   │   ├── registry.py             # 显式注册表（对齐 ADR-014，禁止自动发现）
+│   │   ├── base.py                 # FeatureDetector Protocol
 │   │   ├── moe.py                  # MoE 路由检测
 │   │   ├── mla.py                  # Multi-Latent Attention
 │   │   ├── gqa.py                  # Grouped Query Attention
@@ -597,21 +601,16 @@ backend/app/
 │   │   ├── quantization.py         # 量化配置
 │   │   ├── rope.py                 # 旋转位置编码
 │   │   ├── vision.py               # 视觉编码器
-│   │   ├── audio.py                # 音频编码器
 │   │   ├── cross_attention.py      # 交叉注意力
-│   │   ├── diffusion.py            # 扩散模型
-│   │   ├── vla.py                  # VLA 架构
 │   │   └── tied_weights.py         # 权重共享
+│   │   # diffusion/vla/audio/world_model → v1.1+（parking）
 │   │
 │   ├── flow_generators/
-│   │   ├── registry.py             # 装饰器注册表
-│   │   ├── base.py                 # FlowGenerator ABC
-│   │   ├── inference.py            # 推理数据流
-│   │   ├── training_forward.py     # 训练前向传播
-│   │   ├── training_backward.py    # 训练反向传播
-│   │   ├── multimodal.py           # 端到端多模态数据流
-│   │   ├── diffusion.py            # 扩散模型数据流（去噪循环）
-│   │   └── vla.py                  # VLA 数据流（感知→决策→动作）
+│   │   ├── registry.py             # 显式注册表（对齐 ADR-014）
+│   │   ├── base.py                 # FlowGenerator Protocol
+│   │   ├── inference.py            # 推理数据流（v1.0 主路径）
+│   │   └── multimodal.py           # 视觉多模态数据流（v1.0 视觉部分）
+│   │   # training_forward / training_backward / diffusion / vla → v1.1+（parking）
 │   │
 │   ├── estimators/
 │   │   ├── registry.py             # 装饰器注册表
@@ -623,9 +622,8 @@ backend/app/
 │   │   └── latency.py              # 延迟估算
 │   │
 │   ├── parallel/
-│   │   ├── megatron.py             # Megatron-LM (TP/PP/DP/SP/CP/EP)
-│   │   ├── fsdp.py                 # FSDP
-│   │   └── pp_scheduler.py         # PP 调度器（1F1B / Interleaved / Zero-bubble）
+│   │   # v1.0 仅接口定义 + 空 registry（见 §5.1.15）
+│   │   # Megatron / FSDP / pp_scheduler 实现 → v1.1+（parking）
 │   │
 │   └── layout/
 │       └── engine.py               # 3D 空间布局计算
@@ -1433,8 +1431,6 @@ return GenericAdapter()
 | VisionDetector | `vision_config`, `image_size` | `{patch_size, image_size, vision_hidden_size}` |
 | AudioDetector | `audio_config` | `{sample_rate, feature_size}` |
 | CrossAttentionDetector | cross_attention 类名 | `{cross_attn_layers}` |
-| DiffusionDetector | `model_index.json` 存在 | `{pipeline_class, schedulers, components}` |
-| VLADetector | `action_head`, `robot_config` | `{action_dim, action_space}` |
 | TiedWeightsDetector | `tie_word_embeddings`, graph 中 `id(p)` 相同节点 | `{tied_pairs: [[node_a, node_b], ...]}` |
 
 ---
@@ -1449,12 +1445,10 @@ return GenericAdapter()
 
 | 生成器 | 触发特征 | 生成的 edges |
 |--------|---------|-------------|
-| `inference.py` | 所有模型 | 推理时 token 从 embedding → layers → head 的完整前向数据流 |
-| `training_forward.py` | 所有模型 | 训练前向传播数据流（含 loss 计算） |
-| `training_backward.py` | 所有模型 | 反向传播梯度流（edges 反向 + gradient 标记） |
-| `multimodal.py` | `["vision"]` 或 `["audio"]` | 端到端多模态流：图像/音频编码 → 投影 → 融合 → 语言模型 |
-| `diffusion.py` | `["diffusion"]` | 去噪循环：noise → UNet(timestep,condition) → denoise → decode |
-| `vla.py` | `["vla"]` | 感知 → 推理 → 决策 → 动作空间映射 |
+| `inference.py` | 所有模型（v1.0） | 推理时 token 从 embedding → layers → head 的完整前向数据流 |
+| `multimodal.py` | `["vision"]`（v1.0 视觉部分） | 视觉多模态流：图像编码 → 投影 → 融合 → 语言模型 |
+
+> **v1.1+ 迁移**：`training_forward` / `training_backward` / `diffusion` / `vla` / audio 端到端多模态流生成器详细设计见 parking 文件。
 
 ---
 
@@ -1476,28 +1470,11 @@ return GenericAdapter()
 
 ---
 
-### 5.2.11 `services/parallel/` — 并行策略
+### 5.2.11 `services/parallel/` — 并行策略（v1.0 接口占位）
 
-| 文件 | 职责 |
-|------|------|
-| `megatron.py` | Megatron-LM 策略：TP（Attention/MLP 切分）、PP（层分配）、DP、SP（序列并行）、CP（上下文并行）、EP（专家并行） |
-| `fsdp.py` | FSDP 策略：参数分片、梯度分片、通信模式 |
-| `pp_scheduler.py` | PP 调度器模拟：1F1B、Interleaved 1F1B、Zero-bubble（生成每个 micro-batch 的时间步序列） |
-
-**接口统一**：
-
-```python
-class ParallelStrategy(ABC):
-    @abstractmethod
-    def partition(self, graph: ModuleGraph, config: ParallelConfig) -> PartitionedGraph:
-        """将 ModuleGraph 按并行策略切分，每个节点标记所属 rank/device"""
-        ...
-    
-    @abstractmethod
-    def communication_pattern(self, partitioned: PartitionedGraph) -> list[CommOp]:
-        """生成通信操作序列（All-reduce, P2P 等）"""
-        ...
-```
+> [v1.1+ 内容已迁移至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)]
+>
+> v1.0 仅保留 `ParallelismStrategy` Protocol 定义与空 registry（见 §5.1.15，对齐 11 §4 + ADR-020）；Megatron / FSDP / pp_scheduler 实现推迟至 v1.1+。
 
 ---
 
@@ -1983,55 +1960,9 @@ Router:
 
 ---
 
-### 5.3.4 Diffusers 模型解析流程
+### 5.3.4 Diffusers 模型解析流程（v1.1+）
 
-```
-入口判断:
-  if "_class_name" in config:  # Diffusers pipeline 标志
-      → diffusers_parser
-
-diffusers_parser 流程:
-  1. 识别 pipeline 类型
-     class_name = config["_class_name"]  # e.g. "StableDiffusionXLPipeline"
-
-  2. 找到 denoiser 组件
-     denoiser = find_denoiser(config)
-     # 按 class_name 匹配: UNet2DConditionModel / Transformer2DModel / ...
-     # 不硬编码 "unet" key
-
-  3. 并行 fetch 所有组件 config  # [P1-27]
-     components = [k for k, v in config.items() if isinstance(v, list) and len(v) == 2]
-     component_configs = await asyncio.gather(*[
-         hf_client.fetch_config(repo_id, subfolder=name)
-         for name in components
-     ])  # 5×350ms → ~350ms
-
-  4. 按组件解析 (非递归 admission)  # [P0-2]
-     # 所有组件打包为单个 sandbox 任务
-     if need_phase_b:
-         admission.acquire()  # 模型级别 acquire 一次
-         all_enhanced = await sandbox.run(
-             load_all_components_meta,  # 单个函数加载全部组件
-             repo_id, component_configs
-         )
-         admission.release()
-
-  5. safetensors 按组件目录解析  # [P0-4]
-     for comp_name in components:
-         try:
-             meta = await hf_client.fetch_safetensors_meta(
-                 repo_id, subfolder=comp_name  # 子目录级别
-             )
-         except NotASafetensorsRepoError:
-             # fallback: 扫描该子目录下的文件列表
-             meta = await scan_component_files(repo_id, comp_name)
-
-  6. 构建复合 ModuleGraph
-     root = ModuleNode(name=class_name, type="pipeline")
-     for comp_name, comp_graph in component_graphs.items():
-         root.children.append(comp_graph.root)
-     # denoiser 组件标记为 primary
-```
+> [v1.1+ 内容已迁移至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)]
 
 ---
 
@@ -2069,64 +2000,15 @@ flow_generators/moe_flow.py:
 
 ---
 
-### 5.3.6 并行策略计算流程
+### 5.3.6 并行策略计算流程（v1.1+）
 
-```
-Client ──POST /api/v1/models/{id}/parallel──▶ Router
-  body: { tp: 4, pp: 2, dp: 8, ep: 4, hardware: "A100-80G" }
-
-strategy_composer 流程:
-  1. 加载基础 ModuleGraph (from cache or pipeline)
-
-  2. 硬件规格查询
-     hw = hw_specs.get("A100-80G") → HardwareProfile(
-         memory_gb=80, bandwidth_gbps=600,
-         nvlink=True, ib_bandwidth_gbps=200
-     )
-
-  3. 策略组合与约束校验
-     strategy = strategy_composer.compose(
-         tp=4, pp=2, dp=8, ep=4,
-         total_gpus=tp*pp*dp,  # 64
-         hw=hw
-     )
-     # 约束: tp*pp*dp == total_gpus
-     # 约束: ep ≤ num_experts, ep | num_experts
-
-  4. 分区计算 → PartitionedGraph + CommOps  # [P2-33]
-     partition_result = partition(graph, strategy)
-     # 输出:
-     #   PartitionedGraph: 每个 node 标注 (tp_rank, pp_stage, dp_rank, ep_rank)
-     #   CommOps: List[CommOp(type, src_ranks, dst_ranks, tensor_shape, estimated_time)]
-     #     type ∈ {AllReduce, AllGather, ReduceScatter, P2P, AllToAll}
-
-  5. 返回 JSON for 3D rendering
-```
+> [v1.1+ 内容已迁移至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)]
 
 ---
 
-### 5.3.7 PP 调度器流程
+### 5.3.7 PP 调度器流程（v1.1+）
 
-```
-scheduler.py:
-
-ScheduleStep = NamedTuple('ScheduleStep', [
-    ('stage_id', int),
-    ('micro_batch_id', int),
-    ('action', Literal['F', 'B', 'W', 'IDLE']),
-    ('gpu_id', int),
-    ('time_slot', int),
-])
-
-支持调度策略:
-  - "1f1b": 1F1B pipeline schedule
-  - "interleaved_1f1b": Interleaved 1F1B (Megatron)
-  - "zero_bubble": Zero Bubble (F/B/W separation)
-
-generate_schedule(pp_stages, num_micro_batches, strategy) → List[ScheduleStep]:
-  # 输出每个 GPU 在每个 time_slot 的动作
-  # 用于前端甘特图渲染
-```
+> [v1.1+ 内容已迁移至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)]
 
 ---
 
@@ -3897,202 +3779,19 @@ async def generate(request, repo_id, revision, phase_b, components, detail_level
 
 ---
 
-### 7.4 多模型对比接口
+### 7.4 多模型对比接口（v1.1+）
 
-**`POST /api/v1/compare`**
-
-```python
-from pydantic import BaseModel, Field, model_validator, ConfigDict
-
-class CompareRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    repo_ids: list[str] = Field(..., min_length=2, max_length=4)
-    mode: Literal["quick", "deep"] = "quick"
-    revision: str = "main"
-
-    # C7: 迁移到 model_validator
-    @model_validator(mode="after")
-    def validate_deep_limit(self) -> "CompareRequest":
-        if self.mode == "deep" and len(self.repo_ids) > 2:
-            raise ValueError("deep compare supports max 2 models")
-        # 校验每个 repo_id 格式
-        for rid in self.repo_ids:
-            if not REPO_ID_RE.fullmatch(rid):
-                raise ValueError(f"Invalid repo_id: {rid}")
-        return self
-
-class CompareResponse(BaseModel):
-    models: list[ModelSummary]
-    diff: ComparisonDiff
-
-class ModelSummary(BaseModel):
-    repo_id: str
-    commit_sha: str
-    model_type: str
-    architecture: str
-    num_parameters: int
-    num_hidden_layers: int
-    hidden_size: int
-    features: list[str]
-    revision_used: int                    # 1 (quick) or 2 (deep)
-
-class ComparisonDiff(BaseModel):
-    parameter_comparison: ParameterComparison
-    feature_diff: dict[str, list[bool]]    # feature → [has_a, has_b, ...]
-    structure_diff: StructureDiff
-
-# M13: 结构化参数对比
-class ParameterComparison(BaseModel):
-    model_level: dict[str, list[int | None]]    # field → [model_a, model_b, ...]
-    per_layer: list[LayerComparison]
-
-class LayerComparison(BaseModel):
-    layer_pattern: str
-    values: list[int | None]                     # 与 model 顺序一致
-    ratio: float | None = None
-
-# M13: 增加对齐映射
-class StructureDiff(BaseModel):
-    shared_patterns: list[str]
-    unique_to: dict[str, list[str]]               # repo_id → unique features/modules
-    alignment: list[AlignmentEntry]               # 节点级对齐映射
-    layout_pair: LayoutPair | None = None
-
-class AlignmentEntry(BaseModel):
-    model_a_node: str | None
-    model_b_node: str | None
-    match_type: Literal["exact", "similar", "unique_a", "unique_b"]
-
-class LayoutPair(BaseModel):
-    model_a_offset: list[float]                   # 并排偏移 [x, y, z]
-    model_b_offset: list[float]
-```
-
-```
-请求:
-  POST /api/v1/compare
-  Content-Type: application/json
-
-  {
-    "repo_ids": ["meta-llama/Llama-3.1-70B", "Qwen/Qwen2.5-72B"],
-    "mode": "quick"
-  }
-
-响应:
-  200 OK
-  Cache-Control: max-age=300
-  Content-Location: /api/v1/compare?repos=meta-llama/Llama-3.1-70B,Qwen/Qwen2.5-72B&mode=quick
-
-  {
-    "models": [ ... ],
-    "diff": {
-      "parameter_comparison": {
-        "model_level": {
-          "num_parameters": [70553706496, 72709066752],
-          "num_hidden_layers": [80, 80],
-          "hidden_size": [8192, 8192]
-        },
-        "per_layer": [
-          { "layer_pattern": "self_attn", "values": [109051904, 113246208], "ratio": 1.04 }
-        ]
-      },
-      "feature_diff": {
-        "GQA": [true, true],
-        "SlidingWindow": [false, true]
-      },
-      "structure_diff": {
-        "shared_patterns": ["GQA attention", "SwiGLU FFN", "RMSNorm"],
-        "unique_to": { "Qwen/Qwen2.5-72B": ["SlidingWindowAttention"] },
-        "alignment": [
-          { "model_a_node": "model.layers.0.self_attn", "model_b_node": "model.layers.0.self_attn", "match_type": "exact" },
-          { "model_a_node": null, "model_b_node": "model.layers.0.self_attn.sliding_window", "match_type": "unique_b" }
-        ],
-        "layout_pair": { "model_a_offset": [-6, 0, 0], "model_b_offset": [6, 0, 0] }
-      }
-    }
-  }
-```
-
-> 400 错误 details 中包含限制参数：`{"max_repos_for_deep": 2, "max_repos_for_quick": 4}`
+> [v1.1+ 内容已迁移至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)]
+>
+> v1.0 不交付模型对比分屏（README 冻结范围）。`CompareRequest` / `CompareResponse` / `ComparisonDiff` 等 schema 定义参见 parking 文件。
 
 ---
 
-### 7.5 并行策略接口
+### 7.5 并行策略接口（v1.1+）
 
-**`GET /api/v1/models/{repo_id:path}/parallel`**
-
-```
-请求:
-  GET /api/v1/models/meta-llama/Llama-3.1-70B/parallel?tp=4&pp=2&dp=8&hardware=A100-80G
-
-查询参数:
-  tp: int = Query(1, ge=1, le=128)
-  pp: int = Query(1, ge=1, le=64)
-  dp: int = Query(1, ge=1, le=1024)
-  ep: int = Query(1, ge=1, le=64)       # MoE only
-  cp: int = Query(1, ge=1, le=32)
-  sp: int = Query(1, ge=1, le=32)
-  hardware: Literal["A100-40G", "A100-80G", "H100-80G", "H200", "A10G"] = "A100-80G"
-  micro_batches: int = Query(8, ge=1, le=64)
-  schedule: Literal["1f1b", "interleaved_1f1b", "zero_bubble"] = "1f1b"
-```
-
-```python
-class ParallelResponse(BaseModel):
-    strategy: ParallelStrategy
-    partition: PartitionedGraph
-    comm_ops: list[CommOp]
-    schedule: list[ScheduleStep] | None = None   # PP > 1 时返回
-    hardware: HardwareProfile
-    estimated_memory_per_gpu: ByteSize
-    estimated_comm_overhead: ByteSize
-
-class ParallelStrategy(BaseModel):
-    tp: int
-    pp: int
-    dp: int
-    ep: int
-    cp: int
-    sp: int
-    total_gpus: int
-    constraints_satisfied: bool
-    constraint_violations: list[str]
-    supported_dimensions: list[str]     # 动态返回支持的策略维度
-
-class PartitionedGraph(BaseModel):
-    nodes: list[PartitionedNode]
-
-class PartitionedNode(BaseModel):
-    node_id: str
-    tp_shard: Literal["col", "row"] | None = None
-    pp_stage: int
-    dp_rank: int
-    ep_rank: int | None = None
-
-# M12: 增加时间信息
-class CommOp(BaseModel):
-    op_type: Literal["AllReduce", "AllGather", "ReduceScatter", "P2P", "AllToAll"]
-    source_ranks: list[int]
-    dest_ranks: list[int]
-    tensor_shape: list[int]
-    estimated_bytes: int
-    estimated_time_ms: float
-    start_ms: float                     # 甘特图定位
-    end_ms: float
-
-class ScheduleStep(BaseModel):
-    gpu_id: int
-    time_slot: int                      # 逻辑序号（保留）
-    start_ms: float                     # 相对起始时间
-    end_ms: float                       # 相对结束时间
-    action: Literal["F", "B", "W", "IDLE", "COMM"]
-    stage_id: int
-    micro_batch_id: int
-    memory_usage_bytes: int | None = None
-    comm_op_ids: list[str] | None = None   # 关联通信操作
-```
-
+> [v1.1+ 内容已迁移至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)]
+>
+> v1.0 仅提供 `GET /api/v1/parallelism-strategies`（返回空数组，对齐 04 §4.9.4）；`GET /api/v1/models/{id}/parallel` 与 `ParallelResponse` / `PartitionedGraph` / `CommOp` / `ScheduleStep` 等 schema 推迟至 v1.1+。
 ---
 
 ### 7.6 模型搜索接口
@@ -4232,7 +3931,7 @@ class ErrorDetail(BaseModel):
 | `INVALID_REPO_ID` | 400 | repo_id 格式校验失败 | No | — |
 | `INVALID_PARAMETERS` | 422 | 查询参数校验失败 | No | — |
 | `SSE_CONNECTION_LIMIT` | 429 | SSE 并发连接数超限 | Yes | 估算最早完成任务的剩余时间 |
-| `RATE_LIMITED` | 429 | REST 速率限制 | Yes | slowapi 计算 |
+| ~~`RATE_LIMITED`~~ | ~~429~~ | v1.0 不产出（原则 1，对齐 04 §4.12；v1.1+ 迁至 parking）| — | — |
 | `HUB_RATE_LIMITED` | 429 | HF Hub 返回 429 | Yes | 上游 Retry-After 透传 |
 | `HUB_UNREACHABLE` | 502 | HF Hub 不可达 | Yes | — |
 | `ANALYSIS_TIMEOUT` | 504 | Phase A/B 超时 | Yes | — |
@@ -4544,52 +4243,9 @@ SSEEvent = Annotated[
 
 ### 7.11 Rate Limiting（v1.1+，v1.0 不启用）
 
-> **原则 1（非商业化、内部工具）对齐**：v1.0 **不启用** rate limiting（不做匿名限流、不做 per-IP 计数、不引入 slowapi）。对应错误码 `RATE_LIMITED` 在 v1.0 **不产出**。以下内容保留为 v1.1+ 参考设计，实现时机视是否开放公网而定。
-
-<!-- v1.1+ 参考设计（v1.0 未启用）
-
-```
-策略:
-  全局 SSE 连接:         50 并发（BoundedSSESemaphore）
-  单 IP SSE 连接:        5 并发（per-IP counter）
-  Compare 接口:          10 req/min per IP
-  Explore 接口:          30 req/min per IP
-  Cache DELETE:          5 req/min per API key
-
-实现:
-  SSE:     BoundedSSESemaphore (in-process, 预留 Redis-backed 接口)
-  REST:    slowapi + 统一错误处理器
-
-标准响应头（所有受限接口每个响应携带）:
-  X-RateLimit-Limit: 10
-  X-RateLimit-Remaining: 7
-  X-RateLimit-Reset: 1714000060       # Unix timestamp
-
-429 响应:
-  Retry-After: <seconds>
-  {
-    "error": {
-      "code": "RATE_LIMITED",
-      "message": "Rate limit exceeded",
-      "details": { "limit": "10/min", "retry_after": "30" },
-      "request_id": "req-uuid"
-    }
-  }
-
-统一 slowapi 错误格式:
-  @app.exception_handler(RateLimitExceeded)
-  async def rate_limit_handler(request, exc):
-      return JSONResponse(
-          status_code=429,
-          content=ErrorResponse(error=ErrorDetail(
-              code="RATE_LIMITED",
-              message=str(exc.detail),
-          )).model_dump(),
-          headers={"Retry-After": str(exc.retry_after)},
-      )
-```
--->
-
+> **原则 1（非商业化、内部工具）对齐**：v1.0 **不启用** rate limiting（不引入 slowapi、不做匿名限流、不做 per-IP 计数）。对应错误码 `RATE_LIMITED` 在 v1.0 **不产出**（与 04 §4.12 / §4.4 对齐）。
+>
+> [v1.1+ 参考设计已迁移至 [09-backend-detailed-design-v1.1-parking.md](09-backend-detailed-design-v1.1-parking.md)]
 ---
 
 ### 7.12 CORS 与安全（C8）

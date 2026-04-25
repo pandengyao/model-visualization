@@ -45,12 +45,18 @@
 - [ ] **P0-07** 前端 R3F 最简渲染：30 个 Block 方块（Qwen2-0.5B 有 24 层）+ Drei `<OrbitControls>` + `<Environment preset="studio">`（材质保持精美，不降级）
 - [ ] **P0-08** 前端 Zustand 订阅 SSE（冷启动）与 WS（热更新），状态只管低频交互字段（对齐 ADR-010）
 - [ ] **P0-09** Provenance 在 schema（后端 Pydantic 必填）与前端节点/面板（EXACT/INFERRED/ESTIMATED 徽标）双端均显示
-- [ ] **P0-10** 交互预算观测：记录 `PATCH /config` 端到端延迟、点选响应、scrub 帧时（仅记录，不作门槛）
+- [ ] **P0-10** 交互预算观测 + 告警：
+  - 记录 `PATCH /config` 后端处理延迟、端到端延迟、点选响应、scrub 帧时（仅记录，不作门槛）
+  - **告警阈值**：若 Qwen2-0.5B 的 `PATCH /config` 后端延迟 ≥ 150ms 或端到端 ≥ 250ms（即接近 Phase 1 硬约束的 75%），必须在 Phase 0 验收报告中单列**风险项**，并附带初步瓶颈定位（detect/synthesize/estimate/layout 哪一阶段占大头）与优化建议
+  - **DeepSeek-V3 级延迟估算**：Phase 0 收官前，基于 Qwen2-0.5B 实测 + 四阶段复杂度外推，给出 DeepSeek-V3（671B, 256 experts）的 `PATCH` 预期延迟；若外推值 > 200ms，Phase 1 启动前需讨论：调整预算值 / 增加异步预计算 / 降级为「仅后端 <200ms」放宽端到端
 - [ ] **P0-11** Docker 镜像 build（多阶段：Python backend + Next.js frontend），本地 `docker run` 通过，浏览器访问可看到 Qwen2-0.5B 3D 渲染
+  - **必须记录实际镜像大小**并回填 README / 03-system-architecture.md 的「预计 1.3–2.0GB」占位
+  - **告警阈值**：若实际镜像 > 2.5GB，Phase 0 验收报告必须讨论镜像拆分策略（web/api 分离 / slim torch wheel / 移除 tokenizers 多语言资源）
+- [ ] **P0-12** CI 管线最小集：前端 `pnpm lint && pnpm typecheck && pnpm test:unit`；后端 `ruff check . && mypy src/ && pytest`（对齐 02 §2.8；Phase 0 不强制覆盖率阈值，Phase 1 起强制 ≥70%/≥80%）
 
 ### Phase 0 验收（DoD）
 
-- 上述 **11 条 checklist 全部勾选** 即通过；
+- 上述 **12 条 checklist 全部勾选** 即通过；
 - **不设性能门槛**（FPS / 冷启动时延 / 内存均仅记录）；
 - **扩展契约自洽性**：Adapter 注册表从 1 扩到 N 无需改核心 pipeline（为 Phase 1 与 Phase 2 做铺垫）；
 - Provenance 全字段覆盖已产出的全部节点与边。

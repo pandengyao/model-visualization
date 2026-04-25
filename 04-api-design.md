@@ -239,6 +239,34 @@ data: { "type":"about:blank","title":"Meta load timeout","status":504,"code":"ME
 3. **重连**：客户端保留 `Last-Event-ID`；服务端若能从 ring buffer（最后 64 帧）补发则补发，否则返回 410 + 新快照 URL。
 4. **不用于进度条**：进度条由前端依 revision / layers_used 自行计算，不走独立事件。
 
+#### 4.5.1 revision=1 最小可渲染字段集（首屏契约）
+
+> 对齐原则 3「结构 100% 正确」+ 原则 5「交互硬约束」：`revision=1` 的字段集是契约，不是尽力而为。
+
+**必填字段**（缺任一 → 前端不得尝试渲染，视为错误态）：
+
+| 字段 | 说明 | 来源 | confidence |
+|---|---|---|---|
+| `data.graph.nodes` | Block 层级节点（v1.0 最细粒度为 Block；Op/Tensor 槽位保留但可空） | config.num_hidden_layers + safetensors 扫描 | EXACT/INFERRED |
+| `data.graph.hierarchy` | 节点父子关系树（模型→层组→Block） | 结构推断 | INFERRED |
+| `data.graph.provenance` | 根级 Provenance（原则 9 强制） | pipeline 聚合 | — |
+| `data.profile.template_id` | `"A" \| "B" \| "C" \| "G"`（ADR-015） | Adapter 路由 | EXACT/INFERRED |
+| `data.profile.model_type` | HF `model_type` 字段原值 | config.json | EXACT |
+| `data.layout.positions` | 每个节点的 `[x,y,z]` **初步布局**（网格/环形，由 LayoutStrategy v1 实现） | LayoutEngine | ESTIMATED |
+| `data.layout.camera` | 相机初始 `{position, target, fov}` | 根据 scene bounds 计算 | ESTIMATED |
+
+**revision=1 允许缺失**（待 revision=2 填充）：
+- `data.graph.edges`（数据流边） — revision=1 可为空数组 `[]`，revision=2 填充
+- `data.estimate`（内存/FLOPS） — revision=1 可为 `null`，revision=2 填充
+- `data.profile.features` — revision=1 可为初步集合，revision=2 完善
+
+**前端行为契约**：
+- revision=1 到达 → 立即渲染节点 + 初步布局 + 相机（**不等 edges/estimate**）
+- revision=2 到达 → 原地替换：添加 edges 动画、填充 estimate 面板、profile 徽标补全
+- 若 revision=1 的 `layout.positions` 缺失或为空 → 前端按 **fallback layout**（均匀栅格）渲染，同时在 UI 顶部显示 "布局计算中" 提示；此 fallback 不进入视觉回归快照
+
+> **为何首屏必须含 layout**：若前端自行临时布局，不同渲染环境（浏览器/分辨率/DPR）会产生不一致结果，违反原则 3。layout 由后端 LayoutEngine 统一计算是契约。
+
 ### 4.6 PATCH /config —— 配置热更新（原则 5 硬约束 + 原则 6 动态编辑）
 
 ```

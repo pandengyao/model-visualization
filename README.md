@@ -49,6 +49,8 @@
 | [07-testing-and-metrics](07-testing-and-metrics.md) | 验证矩阵、成功指标、产品路线图 |
 | [08-architecture-decisions](08-architecture-decisions.md) | 架构决策记录（ADR）、MVP 路径、性能预算、GPU 检测、FPS 自适应 |
 | **[09-backend-detailed-design](09-backend-detailed-design.md)** | **后端 API 模块详细设计（8 章：背景→需求→设计目标→术语→方案设计→存储设计→接口设计→风险与待办）** |
+| [09-backend-detailed-design-v1.1-parking](09-backend-detailed-design-v1.1-parking.md) | **v1.1+ 候选存档**（非 v1.0 交付范围）：从 09 剥离的扩散/VLA/世界模型/AST/Template D-F/并行策略/模型对比/rate limiting 等内容，供未来迭代复用 |
+| **[10-frontend-type-contracts](10-frontend-type-contracts.md)** | **前端 TypeScript 类型契约（Provenance/ModuleGraph/ArchitectureProfile/Memory/Layout/Stream 事件/ConfigOverride）—— 与 09 §5.1.2 Pydantic 1:1 对齐的单一事实源** |
 | **[11-extension-points](11-extension-points.md)** | **扩展点契约（Adapter/Template/AnimationLayer/ParallelismStrategy/MemoryEstimator/GPU Catalog/DataFlowDirection/ConfigEdit/Pipeline）—— 原则 6 的落地单一事实源** |
 | [附录 A: 标杆产品分析](appendix-a-benchmark-analysis.md) | Netron/Model Explorer/Transformer Explainer/LLM Viz 源码级分析 |
 | [附录 B: 并行策略设计](appendix-b-parallel-visualization.md) | v2.0 TP/PP/DP/EP/CP/SP 可视化设计 |
