@@ -1,205 +1,176 @@
-# 三、系统架构与项目结构
+# 三、系统架构（概要视图）
 
-> [HF Model Visualizer](README.md) 技术设计文档 — 章三+四
+> ⚠ **本文档为概要性摘要**。
+> - 与 [09-backend-detailed-design.md](09-backend-detailed-design.md) 冲突时，**以 09 为准**（模块职责、阶段契约、数据模型、缓存分段、SSE 协议）。
+> - **扩展点契约**以 [11-extension-points.md](11-extension-points.md) 为准（Adapter / Template / AnimationLayer / MemoryEstimator / ParallelismStrategy Registry 的接口签名与注册方式）。
 
-### 3.1 整体架构
+本章仅给出「组件拓扑 + 两条数据流 + 扩展点集成位置 + 部署形态」的鸟瞰图，用于快速建立心智模型。
 
-```
-┌─────────────────┐     HTTP/JSON      ┌─────────────────┐
-│                 │ ←───────────────── │                 │
-│   Next.js App   │                    │  FastAPI Server  │
-│   (React + R3F) │ ──────────────────→ │                 │
-│                 │  /api/v1/model/*   │  ┌───────────┐  │
-│  ┌───────────┐  │                    │  │ config    │  │
-│  │ 3D Scene  │  │                    │  │ _parser   │  │
-│  │ (R3F+Drei)│  │                    │  ├───────────┤  │
-│  ├───────────┤  │                    │  │ detectors │  │
-│  │ Info Panel│  │                    │  ├───────────┤  │
-│  │ (React)   │  │                    │  │ tree_     │  │
-│  ├───────────┤  │                    │  │ builder   │  │
-│  │ Controls  │  │                    │  ├───────────┤  │
-│  └───────────┘  │                    │  │ param_    │  │
-│                 │                    │  │ estimator │  │
-└─────────────────┘                    │  ├───────────┤  │
-                                       │  │ model_    │  │
-                                       │  │ card      │  │
-                                       │  ├───────────┤  │
-                                       │  │ flow_     │  │
-                                       │  │ generator │  │
-                                       │  └───────────┘  │
-                                       │                 │
-                                       │  TTL Cache      │
-                                       │  ↕               │
-                                       │  HF Hub API     │
-                                       └─────────────────┘
-```
+---
 
-### 3.2 数据流
+## 3.1 定位与原则回顾
+
+- **非商业化**：内部工具，**单租户、无鉴权、无 SSO**，不引入 API 网关 / 服务发现 / 多租户隔离。
+- **性能**：v1.0 除「交互响应 < 200ms」外，**不做任何性能优化**；不预留分布式组件（无 Kafka / Redis 集群 / 消息队列）。
+- **可扩展**：v1.0 架构须最健壮——所有易变点走 Registry（见 11）。
+- **Provenance 可追溯**：每个节点/边/估算值必须携带来源与置信度（见 09 §5.1.2）。
+
+---
+
+## 3.2 组件拓扑
 
 ```
-用户输入 "moonshotai/Kimi-K2.6"
-    │
-    ▼
-Next.js Route → /model/moonshotai/Kimi-K2.6
-    │
-    ▼ fetch
-FastAPI: GET /api/v1/model/moonshotai/Kimi-K2.6
-    │
-    ├─ 检查 TTL Cache → 命中则直接返回
-    │
-    ├─ httpx 下载 config.json (from HF Hub)
-    ├─ huggingface_hub.model_info() 获取元数据
-    ├─ httpx 下载 README.md（完整内容）
-    │
-    ├─ config_parser.extract_key_config(config_dict)
-    ├─ detectors.detect_moe(config_dict)
-    ├─ detectors.detect_mla(config_dict)
-    ├─ detectors.detect_quantization(config_dict)
-    ├─ detectors.detect_sub_configs(config_dict)
-    │
-    ├─ tree_builder.build_synthetic_tree(config_dict)
-    ├─ param_estimator.estimate_params_from_config(config_dict)
-    ├─ flow_generator.generate_data_flow(config_dict)
-    │
-    ▼ 写入 Cache + 返回 JSON
-React 接收 JSON → 渲染 3D 场景
+┌───────────────────────────── 前端层 (Next.js 15 / React 19) ─────────────────────────────┐
+│                                                                                          │
+│   app/model/[org]/[repo]/page.tsx                                                        │
+│   ┌──────────────────────────────┐   ┌────────────────────┐   ┌──────────────────────┐  │
+│   │   R3F Scene (Canvas)         │   │   ConfigEditor     │   │   GPUSelector        │  │
+│   │   ┌────────────────────────┐ │   │   (PATCH /config)  │   │   (读 GPU Catalog)   │  │
+│   │   │ AnimationLayer 堆叠     │ │   └────────────────────┘   └──────────────────────┘  │
+│   │   │  L1 Structure          │ │                                                       │
+│   │   │  L2 DataFlow           │ │   ┌───────────────────────── Zustand Store ────────┐ │
+│   │   │  L3 Heatmap  (v1.1)    │ │   │   graph / layout / revision / overrides /      │ │
+│   │   │  L4 Parallelism(v1.2)  │ │   │   selectedGPU / streamState                    │ │
+│   │   └────────────────────────┘ │   └────────────────────────────────────────────────┘ │
+│   └──────────────────────────────┘                                                       │
+└────────────────────┬──────────────────────────────────────────────┬──────────────────────┘
+                     │ SSE  (冷启动 revision=1 / 2)                 │ WebSocket 或 SSE
+                     │ GET  /api/v1/stream/{org}/{repo}             │ PATCH /api/v1/stream/{org}/{repo}/config
+                     ▼                                              ▼
+┌───────────────────────────────── 后端层 (FastAPI) ───────────────────────────────────────┐
+│                                                                                          │
+│   FastAPI Router  (routers/model.py, routers/stream.py)                                  │
+│                                                                                          │
+│   Pipeline — 五阶段纯函数（无副作用，I/O 除外，见 09 §5.1.1）                              │
+│   ┌──── S1 parse ────┬──── S2 detect ────┬──── S3 synthesize ─┬─ S4 estimate ─┬─ S5 layout ┐
+│   │ config.json      │ ArchitectureProfile│ edges / flows      │ params/mem/   │ 2D+3D      │
+│   │ safetensors hdr  │                    │                    │ FLOPs         │ 坐标       │
+│   └──────────────────┴────────────────────┴────────────────────┴───────────────┴────────────┘
+│           ▲                   ▲                                      ▲                    │
+│           │                   │                                      │                    │
+│   ┌───────┴───────┐   ┌───────┴─────────┐                  ┌─────────┴────────────┐       │
+│   │ ArchitectureAdapter │ TemplateContract│                  │ MemoryEstimator       │     │
+│   │    Registry        │    Registry     │                   │   Registry           │     │
+│   └────────────────────┘ (前端消费)       │                   └──────────────────────┘     │
+│                                                                                           │
+│   ┌──────────────────────────┐                                                            │
+│   │ ParallelismStrategy      │  v1.0 仅接口就位，未接入主流程（见 11 §5）                  │
+│   │    Registry              │                                                            │
+│   └──────────────────────────┘                                                            │
+└───────────────────────────────────┬─────────────────────────────────┬────────────────────┘
+                                    │                                 │
+                                    ▼                                 ▼
+┌─────────────────── 数据层 ─────────────────┐       ┌───────────── 外部 ──────────────┐
+│  L0 内存缓存 (cachetools / 进程内)         │       │   HuggingFace Hub               │
+│  L1 文件缓存 (~/.cache/hf-visualizer)       │◄─────►│   (config.json / safetensors   │
+│  GPU Catalog YAML (backend/data/gpus.yaml) │       │    header / repo metadata)     │
+│   └─ 被 S4 / GPUSelector 消费               │       └─────────────────────────────────┘
+└────────────────────────────────────────────┘
+```
+
+**依赖方向**：Router → Pipeline（纯函数） → Registry/数据层；Registry 与数据层之间**不直接互调**。
+
+---
+
+## 3.3 数据流
+
+### 3.3.1 冷启动路径（SSE 两段推送）
+
+```
+Browser
+  │  GET /api/v1/stream/{org}/{repo}   (Accept: text/event-stream)
+  ▼
+FastAPI Router
+  │
+  ├─► S1 parse          config.json + safetensors header  (L0/L1 缓存命中则复用)
+  │
+  ├─► S2 detect         ArchitectureAdapter Registry 选出 adapter
+  │                     → ArchitectureProfile + ModuleGraph 骨架
+  │
+  │◄── emit SSE { revision: 1, is_final: false }    ← 首屏可渲染快照
+  │
+  ├─► S3 synthesize     补 edges / data-flow
+  ├─► S4 estimate       params / memory / FLOPs  (MemoryEstimator Registry + GPU Catalog)
+  ├─► S5 layout         2D+3D 坐标
+  │
+  └─► emit SSE { revision: 2, is_final: true }      ← 最终完整快照
+```
+
+- 每段 SSE 都是**完整可渲染快照**（不是增量/进度条）。前端收到 revision=1 立即首屏，收到 revision=2 整体替换。
+- 数据模型（ModuleGraph / ArchitectureProfile / Provenance / StageOutcome）见 09 §5.1.2。
+
+### 3.3.2 热更新路径（PATCH /config）
+
+```
+用户在 ConfigEditor 修改 hidden_size / num_layers / …
+  │
+  ▼
+PATCH /api/v1/stream/{org}/{repo}/config   body: { overrides: {...} }
+  │
+  ▼
+Router 复用原始 config + overrides（合并后为 effective_config）
+  │
+  ├─► 跳过 S1（config 已在内存，safetensors header 不受 overrides 影响）
+  ├─► S2 detect      （adapter 通常不变，快路径直通）
+  ├─► S3 synthesize
+  ├─► S4 estimate
+  └─► S5 layout
+  │
+  └─► 通过 WebSocket 或 SSE 推送 { revision: N+1, is_final: true }
+       ── 后端预算 **< 200ms**（交互响应要求，见 3.1）
 ```
 
 ---
 
-## 四、项目结构
+## 3.4 扩展点集成位置
+
+所有扩展的**接口签名与注册方式以 11 为准**，本节仅标注它们在架构图中的位置与被调用时机。
+
+| 扩展点 | Registry 位置 | 被谁消费 | 调用时机 |
+|---|---|---|---|
+| **ArchitectureAdapter** | 后端 `backend/adapters/` | S2 `detect_features` | S1 完成后、S2 开始时选型 |
+| **TemplateContract** | 前端 `frontend/src/templates/` | R3F Scene | 收到 SSE 后前端渲染选型 |
+| **AnimationLayer (L1–L4)** | 前端 `frontend/src/animations/` | R3F Scene | 渲染时按模板声明叠加（L1 基底，L2–L4 可选层） |
+| **MemoryEstimator** | 后端 `backend/estimators/` | S4 `estimate_resources` | 每个估算策略一个实例，按 profile 匹配 |
+| **ParallelismStrategy** | 后端 `backend/parallel/` | 预留接口，**v1.0 未接入主流程** | v1.2 起在 S4/S5 之间调用 |
+| **GPU Catalog** | 后端 `backend/data/gpus.yaml` | S4（显存判定）+ 前端 GPUSelector | 全流程只读数据依赖 |
+
+---
+
+## 3.5 部署形态
+
+### 3.5.1 定位
+
+单租户内部工具，**单实例 Docker 容器即可**：
+- 不做多区域、不做高可用、不做多副本负载均衡。
+- **K8s 是可选项**，不作为前置条件；裸 Docker 足够。
+- 不引入 API 网关、服务注册中心、消息队列。
+
+### 3.5.2 开发模式
 
 ```
-/Users/frank/work/hf-model-visualizer/
-│
-├── backend/                              # FastAPI 后端
-│   ├── pyproject.toml
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                       # FastAPI 入口 + CORS + 路由挂载
-│   │   ├── routers/
-│   │   │   ├── __init__.py
-│   │   │   ├── model.py                  # GET /api/v1/model/{org}/{repo}[/config|tree|params]
-│   │   │   └── compare.py               # POST /api/v1/compare
-│   │   ├── services/
-│   │   │   ├── __init__.py
-│   │   │   ├── config_parser.py          # async 下载 + 解析 config.json
-│   │   │   ├── detectors.py              # MoE/MLA/量化/子配置检测
-│   │   │   ├── tree_builder.py           # 合成树生成
-│   │   │   ├── param_estimator.py        # 参数估算
-│   │   │   ├── model_card.py             # HF 模型卡片 + README 完整内容
-│   │   │   └── flow_generator.py         # 推理数据流步骤生成
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   └── schemas.py               # Pydantic 响应模型
-│   │   └── cache.py                      # TTLCache 封装
-│   └── tests/
-│       ├── test_config_parser.py
-│       ├── test_detectors.py
-│       ├── test_param_estimator.py        # 参数估算准确性测试（含 ground truth）
-│       └── test_api.py
-│
-├── frontend/                             # Next.js + R3F 前端
-│   ├── package.json
-│   ├── next.config.js
-│   ├── tsconfig.json
-│   ├── tailwind.config.ts
-│   ├── postcss.config.js
-│   ├── public/
-│   │   └── favicon.svg
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── layout.tsx                # Root layout (dark theme)
-│   │   │   ├── page.tsx                  # 首页：搜索框 + 热门模型卡片
-│   │   │   └── model/
-│   │   │       └── [org]/
-│   │   │           └── [repo]/
-│   │   │               └── page.tsx      # 模型可视化主页面
-│   │   ├── components/
-│   │   │   ├── ui/                       # 通用 UI 组件
-│   │   │   │   ├── SearchBar.tsx
-│   │   │   │   ├── ModelHeader.tsx       # 模型基本信息 + 徽章
-│   │   │   │   ├── ParamTable.tsx        # 参数统计表
-│   │   │   │   ├── ModeToggle.tsx        # 2D/3D 模式切换按钮
-│   │   │   │   ├── Sidebar.tsx           # 五视图上下文侧边栏
-│   │   │   │   ├── TimelineControl.tsx   # Guided Tour 时间轴控制条
-│   │   │   │   ├── SearchPanel.tsx       # 正则搜索面板（4 种匹配模式）
-│   │   │   │   ├── BookmarkBar.tsx       # 书签栏（1-9 快捷键）
-│   │   │   │   └── LoadingSpinner.tsx
-│   │   │   ├── two-d/                    # 2D 可视化组件
-│   │   │   │   ├── Graph2D.tsx           # SVG DAG 图主容器
-│   │   │   │   ├── Node2D.tsx            # 2D 节点（圆角矩形 + 颜色编码）
-│   │   │   │   ├── Edge2D.tsx            # 2D 边（贝塞尔曲线 + 箭头）
-│   │   │   │   ├── DataFlowAnim2D.tsx    # 2D 数据流动画（SVG 路径动画）
-│   │   │   │   ├── SplitPane.tsx         # 分屏对比面板
-│   │   │   │   └── ExportSVG.tsx         # SVG/PNG 导出
-│   │   │   └── three/                    # 3D 可视化组件（按功能域分组）
-│   │   │       ├── core/                 # 场景基础设施
-│   │   │       │   ├── Scene.tsx         # Canvas + 灯光 + 后处理 + 相机
-│   │   │       │   ├── CameraRig.tsx     # 弹簧物理相机控制 + 飞越动画
-│   │   │       │   ├── ConnectionLines.tsx# 层间连线（QuadraticBezierLine）
-│   │   │       │   ├── LayerBlock.tsx    # 单层 3D 块（RoundedBox + 材质）
-│   │   │       │   └── InfoPanel.tsx     # Html overlay 信息面板
-│   │   │       ├── architecture/         # 架构可视化
-│   │   │       │   ├── ModelArchitecture.tsx # 完整模型 3D 架构布局
-│   │   │       │   ├── MoEGrid.tsx       # MoE 专家 3D 网格 (InstancedMesh)
-│   │   │       │   └── MLAFlow.tsx       # MLA 漏斗 3D 动画
-│   │   │       ├── dataflow/             # 数据流动画
-│   │   │       │   ├── DataFlowParticles.tsx # 数据流发光粒子系统
-│   │   │       │   ├── InputVisualization.tsx # 数据预处理动画
-│   │   │       │   ├── OutputVisualization.tsx# 输出可视化
-│   │   │       │   └── TensorShape3D.tsx # 张量形状 3D 变形动画
-│   │   │       └── tour/                 # Guided Tour
-│   │   │           └── GuidedTour.tsx    # 自动播放 Guided Tour (GSAP Timeline)
-│   │   ├── lib/
-│   │   │   ├── api.ts                    # 后端 API 客户端
-│   │   │   ├── types.ts                  # TypeScript 类型定义
-│   │   │   ├── colors.ts                 # 颜色编码常量
-│   │   │   └── layout.ts                 # 3D 布局计算
-│   │   └── stores/
-│   │       └── useModelStore.ts          # Zustand 状态管理
-│   └── .env.local                        # NEXT_PUBLIC_API_URL=http://localhost:8000
-│
-└── README.md
+┌──────────────────────────────┐        ┌──────────────────────────────┐
+│  FastAPI (uvicorn --reload)  │  HTTP  │  Next.js dev server           │
+│  :8000                       │◄──────►│  npm run dev   :3000          │
+└──────────────────────────────┘        └──────────────────────────────┘
+        两个进程独立启动，前端 proxy 到后端 8000
 ```
 
-### 3.3 部署策略
+### 3.5.3 生产模式
 
-#### Docker 多阶段构建
+**单 Docker 镜像，多阶段构建**：
 
-```dockerfile
-# Stage 1: Python 依赖
-FROM python:3.12-slim AS backend-deps
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir transformers huggingface_hub fastapi uvicorn httpx cachetools
-
-# Stage 2: 前端构建
-FROM node:20-slim AS frontend-build
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 3: 最终镜像
-FROM python:3.12-slim
-COPY --from=backend-deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=frontend-build /app/frontend/.next /app/frontend/.next
-COPY backend/ /app/backend/
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+┌─ Stage 1: python:3.12-slim      ─► 安装 backend 依赖（CPU-only torch）
+├─ Stage 2: node:20-slim          ─► next build  → standalone 静态产物
+└─ Stage 3: python:3.12-slim (终镜像)
+     ├── /app/backend              （FastAPI + uvicorn）
+     ├── /app/frontend/.next/standalone  + /static + /public
+     └── entrypoint.sh：启动 uvicorn :8000 + node server.js :3000
 ```
 
-#### 关键优化
-
-| 优化项 | 方案 | 效果 |
-|---|---|---|
-| **CPU-only torch** | 使用 `pytorch.org/whl/cpu` 索引 | 镜像 ~1.5GB (vs CUDA 版 ~5GB) |
-| **层缓存** | 将 pip install 和 npm ci 放在 COPY 源码之前 | 依赖层可复用，构建 <2min |
-| **预缓存热门模型** | 启动时异步预加载 Top-100 模型配置 | 冷启动后首次请求 <500ms |
-| **transformers 保留** | 后端依赖 torch+transformers | meta-device 真实模型树 + forward() 分析 |
-
-> **注意**: CPU-only torch 已足够支持 `torch.device("meta")` 加载和 transformers 推理验证，无需 CUDA。
+- Next.js 采用 **`output: 'standalone'`** 模式，最终镜像只需很薄的 Node 运行时即可承载静态产物与少量 SSR。
+- 镜像大小按当前依赖估算 ~1.3–2.0 GB（torch CPU + transformers 占主要体积，以实际构建为准）。
 
 ---
 

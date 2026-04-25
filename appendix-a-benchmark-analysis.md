@@ -100,7 +100,7 @@
 | **逐权重数据纹理采样**：将权重值存为 GPU 纹理，片段着色器通过 `texelFetch` + `u_accessMtx` 矩阵映射 3D 块坐标到纹理坐标，正值=蓝色、负值=黑色、零=灰色 | **未来演进（v2.0）**：真正的 "X-Ray" 模式，展示逐权重值的 3D 热力体 |
 | **多尺度网格线**：16 格和 256 格边界线，通过 GLSL `fwidth()` + `smoothstep` 实现 LOD 平滑出现/消失 | 借鉴：3D 场景的参考网格使用类似的多尺度 LOD 渲染 |
 | **引导式 Walkthrough**：10 个步骤组件精确对应 forward pass，每步控制相机位置、块体高亮（透明度 0-1）、文字标注 | **直接采纳**：实现 "Guided Tour" 模式 — 相机沿推理路径飞越，逐步高亮当前模块并显示说明 |
-| **多 Pass 渲染**：Blur/Glow Pass → Geometry → Block Lighting → Thread → Opaque → Arrow → Overlay → Overlay2D | 简化采纳：R3F 通过 `<EffectComposer>` + `<Bloom>` + `<SelectiveBloom>` 实现类似的多 Pass 效果 |
+| **多 Pass 渲染**：Blur/Glow Pass → Geometry → Block Lighting → Thread → Opaque → Arrow → Overlay → Overlay2D | 简化采纳：R3F 通过 `<EffectComposer>` + `<Bloom>` + `<Selection>` + `<Select>` 实现类似的多 Pass 选择性 Bloom 效果 |
 | **弹簧物理相机**：临界阻尼（`2 * sqrt(mass * tension)`）相机动画，667ms 过渡 | **直接采纳**：R3F `<CameraControls>` + react-spring 弹簧物理驱动相机飞越 |
 | **按需渲染**：非持续渲染循环，仅状态变化时重绘 | **直接采纳**：R3F Canvas 设置 `frameloop="demand"`，仅需要时渲染 |
 

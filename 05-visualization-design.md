@@ -1,1024 +1,523 @@
-# 六、2D/3D 双模式可视化设计
+# 五、3D 可视化设计（v1.0 纯 3D）
 
-> [HF Model Visualizer](README.md) 技术设计文档 — 章六
+> **v1.0 范围**：纯 3D 模式（含 WebGL 不可用时的文字 Fallback）。**2D SVG 模式整节已删除**，移至 v1.1+（见本文件末尾 TODO）。
+>
+> **对齐产品原则**：2（精美 3D 风格）/ 3（结构与数据流 100% 正确）/ 4（教学深度与动画精细度超越竞品）/ 5（前期不做性能优化，交互响应除外）/ 6（AnimationLayer 插件式叠加）/ 7（真实模型优先）/ 8（Template A/B/C/G 架构广度底线）/ 9（Provenance 强制展示）。
+>
+> **契约权威**：AnimationLayer 四层分工以 [11-extension-points.md §3](11-extension-points.md) 为准，本文件是其视觉落地。
+
+> [HF Model Visualizer](README.md) 技术设计文档 — 章五
 
 ## 目录
 
-- [6.0 双模式架构](#60-双模式架构)
-  - [模式切换按钮](#模式切换按钮)
-  - [共享数据层 vs 独立渲染层](#共享数据层-vs-独立渲染层)
-- [6.0.0 WebGL 降级策略](#600-webgl-降级策略)
-- [6.0.1 2D 模式设计（借鉴 Netron + Model Explorer）](#601-2d-模式设计借鉴-netron--model-explorer)
-  - [渲染技术](#渲染技术)
-  - [2D 节点设计](#2d-节点设计)
-  - [2D 数据流动画](#2d-数据流动画)
-  - [2D 专属功能](#2d-专属功能)
-- [6.1 3D 模式设计（主体，保持原有设计）](#61-3d-模式设计主体保持原有设计)
-- [6.1.1 深度借鉴 LLM Viz 的 3D 实现细节](#611-深度借鉴-llm-viz-的-3d-实现细节)
-  - [A. 3D 空间隐喻（核心布局哲学）](#a-3d-空间隐喻核心布局哲学)
-  - [B. 残差流 (Residual Stream) 可视化](#b-残差流-residual-stream-可视化)
-  - [C. 多 Pass 渲染 + 选择性 Bloom](#c-多-pass-渲染--选择性-bloom)
-  - [D. 多尺度网格线 + LOD 系统](#d-多尺度网格线--lod-系统)
-  - [E. 块体光照模型 (Block Lighting)](#e-块体光照模型-block-lighting)
-  - [F. 线程连线渲染 (Thread Rendering)](#f-线程连线渲染-thread-rendering)
-  - [G. 弹簧物理相机 (Spring Camera)](#g-弹簧物理相机-spring-camera)
-  - [H. 多列布局换行](#h-多列布局换行)
-- [6.2 交互设计](#62-交互设计)
-- [6.3 MoE 3D 专家网格](#63-moe-3d-专家网格)
-- [6.4 MLA 3D 漏斗](#64-mla-3d-漏斗)
-- [6.5 端到端 3D 数据流可视化](#65-端到端-3d-数据流可视化)
-  - [阶段一：数据预处理（Input → Embedding）](#阶段一数据预处理input--embedding)
-  - [阶段二：模型内部数据流转（Decoder Layers）](#阶段二模型内部数据流转decoder-layers)
-  - [阶段三：最终输出可视化（Norm → LM Head → Tokens）](#阶段三最终输出可视化norm--lm-head--tokens)
-  - [自动动画播放模式](#自动动画播放模式)
-  - [Tensor Shape 3D 实时标注](#tensor-shape-3d-实时标注)
-- [6.6 现代感视觉设计规范](#66-现代感视觉设计规范)
-  - [设计语言：「深空科技」](#设计语言深空科技)
-  - [色彩系统](#色彩系统)
-  - [材质与光影](#材质与光影)
-  - [UI 组件现代感规范](#ui-组件现代感规范)
-  - [动画与过渡](#动画与过渡)
+- [6.1 3D 场景总览与空间隐喻](#61-3d-场景总览与空间隐喻)
+- [6.2 AnimationLayer 四层叠加模型](#62-animationlayer-四层叠加模型)
+- [6.3 v1.0 Stage-2 数据流动画（三项最终范围）](#63-v10-stage-2-数据流动画三项最终范围)
+  - [① Attention Q/K/V 分解动画](#-attention-qkv-分解动画)
+  - [② MoE 路由动画](#-moe-路由动画)
+  - [③ Residual flow 动画](#-residual-flow-动画)
+- [6.4 视觉规范（精美硬约束，对齐原则 2）](#64-视觉规范精美硬约束对齐原则-2)
+  - [配色系统（深色优先 + 玫瑰金强调）](#配色系统深色优先--玫瑰金强调)
+  - [材质](#材质)
+  - [光照](#光照)
+  - [后处理（必选）](#后处理必选)
+  - [微交互](#微交互)
+  - [排版](#排版)
+  - [相机](#相机)
+  - [动效缓动](#动效缓动)
+- [6.5 Template A/B/C/G 视觉设计（对齐原则 8）](#65-template-abcg-视觉设计对齐原则-8)
+- [6.6 Provenance 徽标规范（对齐原则 9）](#66-provenance-徽标规范对齐原则-9)
+- [6.7 Config 编辑器 UI 规范（对齐原则 6 PATCH /config）](#67-config-编辑器-ui-规范对齐原则-6-patch-config)
+- [6.8 GPU 选择器 UI 规范（对齐原则 6 GPU Catalog）](#68-gpu-选择器-ui-规范对齐原则-6-gpu-catalog)
+- [6.9 交互设计](#69-交互设计)
+- [6.10 WebGL 不可用 Fallback](#610-webgl-不可用-fallback)
+- [6.11 v1.1+ TODO（本文件范围内）](#611-v11-todo本文件范围内)
 
-### 6.0 双模式架构
+---
+
+## 5.1 3D 场景总览与空间隐喻
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  工具栏                                                    │
-│  [🔍 搜索] [📐 2D ◀▶ 3D] [▶ Guided Tour] [⚙ 设置]       │
-│                                                            │
-│  ┌──────────────────────────────┬───────────────┐  │
-│  │                                      │               │  │
-│  │     可视化区域                        │   侧边栏      │  │
-│  │     (2D: SVG Canvas)                 │   (五视图)    │  │
-│  │     (3D: R3F Canvas)                 │               │  │
-│  │                                      │   属性面板     │  │
-│  │                                      │   步骤列表     │  │
-│  │                                      │   参数统计     │  │
-│  └──────────────────────────────┴───────────────┘  │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  时间轴（Guided Tour 模式）                            │  │
-│  │  ◀ ⏸ ▶  ───●──────────────── 1:30 / 5:00  [1x]      │  │
-│  └──────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  顶部工具栏                                                        │
+│  [🔍 搜索] [🧊 Template A/B/C/G 指示]                              │
+│  [⚡ GPU: A100-80G ▼] [▶ Guided Tour] [⚙ Animation Layers]        │
+│                                                                    │
+│  ┌───────────────────────────────────┬────────────────────────┐  │
+│  │                                     │  右侧浮动面板          │  │
+│  │        R3F Canvas (3D 场景)         │  ───────────────────   │  │
+│  │                                     │  Provenance Summary    │  │
+│  │                                     │  ───────────────────   │  │
+│  │                                     │  Config 编辑器         │  │
+│  │                                     │  （实时 PATCH /config） │  │
+│  │                                     │  ───────────────────   │  │
+│  │                                     │  节点属性 / 张量形状    │  │
+│  │                                     │  MemoryBreakdown        │  │
+│  └───────────────────────────────────┴────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────┐│
+│  │  AnimationLayer 时间轴                                         ││
+│  │  [L1 Structure  ▢]  [L2 DataFlow  ▢]                          ││
+│  │  [L3 Heatmap v1.1 🔒]  [L4 Parallelism v1.2 🔒]               ││
+│  │  ◀ ⏸ ▶  ───●──────────────── 1:30 / 5:00  [1x]                ││
+│  └──────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-#### 模式切换按钮
+**空间隐喻（以 `meta-llama/Llama-3-8B` 32 层解码器为例）**：
 
 ```
-┌─────────────────────────────┐
-│  📐 2D  │  🧊 3D  │         │  ← 分段控制器(Segmented Control)
-└─────────────────────────────┘
+  Y 轴向下 = 推理方向（token 从上到下穿越）
+  X 轴水平 = 计算分支（左: Attention / 中: Residual 主干 / 右: MLP 或 MoE）
+  Z 轴深度 = 并行结构（heads / experts 沿 Z 轴展开）
 
-切换行为:
-  - 2D → 3D: 当前展开状态保留，2D 节点位置映射到 3D 坐标
-  - 3D → 2D: 当前展开状态保留，3D 布局投影到 2D DAG
-  - 过渡动画: 0.5s ease-out，节点从 2D 位置飞到 3D 位置（或反向）
-  - URL 参数: ?mode=2d / ?mode=3d
-  - 默认: 3D 模式
+  ┌──────────────┐
+  │  Embedding   │  emb: (vocab=128256, hidden=4096) ← Template A 标准入口
+  └──────┬───────┘
+         │
+  ┌──────┴──────────────────────────────────┐
+  │  Decoder Block × 32（展开后）             │
+  │   ┌─────────────┐         ┌──────────┐  │
+  │   │  Attention  │◀══ 主干 ═▶│   MLP   │  │   注意力蓝 / MLP 紫
+  │   │  (Q/K/V)    │  residual │(SwiGLU) │  │
+  │   └─────────────┘         └──────────┘  │
+  └──────┬──────────────────────────────────┘
+         │
+  ┌──────┴───────┐
+  │  Final Norm  │
+  └──────┬───────┘
+  ┌──────┴───────┐
+  │   LM Head    │  (hidden=4096 → vocab=128256)
+  └──────────────┘
+
+  真实模型示例（v1.0 必须全部跑通）:
+    - meta-llama/Llama-3-8B          → Template A
+    - mistralai/Mixtral-8x7B         → Template B（8 experts, top-2）
+    - deepseek-ai/DeepSeek-V3        → Template C（MLA + 256 experts + shared）
+    - 任何未识别的 *ForCausalLM      → Template G（通用回退 + INFERRED 徽标）
 ```
 
-#### 共享数据层 vs 独立渲染层
+---
 
-```
-┌─────────────────────────────────────────┐
-│  共享数据层 (Zustand Store)              │
-│                                          │
-│  - modelData: API 返回的完整 JSON        │
-│  - expandedNodes: Set<string>            │
-│  - selectedNode: string | null           │
-│  - searchQuery: string                   │
-│  - overlayData: NDP 叠加数据             │
-│  - tourState: { step, playing, speed }   │
-│  - bookmarks: SavedState[9]              │
-│  - sidebarView: 'model'|'node'|'tensor'  │
-└──────────┬──────────────┬───────────────┘
-           │              │
-    ┌──────┴──────┐  ┌───┴───────────┐
-    │   2D 渲染    │  │   3D 渲染     │
-    │              │  │               │
-    │  SVG/Canvas  │  │  R3F + Three  │
-    │  + D3 Force  │  │  + Drei       │
-    │  + dagre     │  │  + GSAP       │
-    │              │  │               │
-    │  搜索高亮    │  │  Bloom 高亮   │
-    │  SVG 导出    │  │  PNG 导出     │
-    │  分屏对比    │  │  粒子数据流   │
-    └─────────────┘  └───────────────┘
-```
+## 5.2 AnimationLayer 四层叠加模型
 
-### 6.0.0 WebGL 降级策略
+> **契约对齐**：本节严格对齐 [11-extension-points.md §3](11-extension-points.md)。层间通过共享 `AnimationContext` 时间轴协调，禁止硬编码依赖；每层可独立 toggle，关闭任一层不得破坏其他层。
 
-不是所有用户都有支持 WebGL 的浏览器或足够的 GPU 性能。必须提供优雅降级：
+### 5.2.1 四层分工
 
-```
-Level 0 (默认): 完整 3D + Bloom + 粒子数据流
-  条件: WebGL2 + 独立/集成 GPU
-  体验: 全功能 3D 可视化
+| 层 | 名称 | v1.0 范围 | 职责 | 叠加依赖 |
+|---|---|---|---|---|
+| **L1** | StructureAnimation | ✅ v1.0 | 模块展开 / 收起 / 层级过渡 | — |
+| **L2** | DataFlowAnimation | ✅ v1.0（三项子集） | Attention Q/K/V + MoE 路由 + Residual flow | L1 |
+| **L3** | NumericalHeatmap | v1.1 | Attention 权重热力、激活值分布 | L1 + L2 |
+| **L4** | ParallelismAnimation | v1.2 | TP / PP / DP / EP / CP / SP 通信原语 | L1 + L2 |
 
-Level 1 (简化 3D): 3D 几何体 + 无后处理 + 无粒子
-  条件: WebGL1 或 GPU 检测到低性能
-  体验: 可旋转的 3D 架构树，无动画效果
+### 5.2.2 前端 UI（强制要求）
 
-Level 2 (2D SVG): dagre 布局 + SVG 渲染
-  条件: 无 WebGL 或用户主动选择
-  体验: 经典 2D DAG 图，仍可交互展开/折叠
+- 工具栏底部 / 时间轴上方必须提供四层**独立开关**（toggle）+ **独立时间轴进度条**。
+- L3 / L4 在 v1.0 显示为 🔒 灰态（hover 提示"v1.1/v1.2 交付"）。
+- 开关触发后，`AnimationContext.timeline` 重编排，不重建场景。
+- 同屏多层同时启用时，**时间轴共享**（master timeline），各层通过 `(startTime, duration, targetNodeId, tween)` 元组声明自身片段。
 
-Level 3 (纯文本): ASCII 结构树 + 参数表格
-  条件: 极端环境（无头浏览器、屏幕阅读器）
-  体验: tree_text + Markdown 表格，零 JS 依赖
+### 5.2.3 AnimationContext 共享时间轴（TS 草案）
+
+```typescript
+interface AnimationContext {
+  master: gsap.core.Timeline;      // 全局主时间轴
+  layers: Record<'L1_structure' | 'L2_dataflow' | 'L3_heatmap' | 'L4_parallelism',
+                 { enabled: boolean; sub: gsap.core.Timeline }>;
+  graph: ModuleGraph;              // 当前 ModuleGraph（PATCH /config 后重新注入）
+  now: number;                     // 秒
+}
 ```
 
-**检测逻辑** (首次加载时执行):
-1. `document.createElement('canvas').getContext('webgl2')` → Level 0/1
-2. 无 WebGL2 → 尝试 `webgl` → Level 1
-3. 均失败 → Level 2
-4. GPU 性能检测: 渲染 100 个 Instanced 立方体，FPS < 15 → 降级一级
-5. 用户可在设置中手动覆盖降级级别
+**约束**：
+- L2 读取 L1 提供的节点最终 world position，但**不得**通过直接引用 R3F ref 耦合 —— 必须通过 `AnimationContext.graph` 的 layout 结果。
+- L1 关闭时，L2 在折叠态节点上以简化形式播放（例如残差只走主干直线）。
 
-### 6.0.1 2D 模式设计（借鉴 Netron + Model Explorer）
+---
 
-#### 渲染技术
+## 5.3 v1.0 Stage-2 数据流动画（三项最终范围）
+
+> **最终决议（对齐原则 4：教学深度与动画精细度大幅超越竞品）**：
+>
+> 原先被移至 v1.1 的 Stage-2 三项核心动画，**全部拉回 v1.0 必交付范围**：
+> 1. **Attention Q/K/V 分解**
+> 2. **MoE 路由**
+> 3. **Residual flow（含 Pre/Post-LN 位置）**
+>
+> **v1.1+ 保留**：脉动 / 膨胀 / 螺旋 / 热力图 / token residual 细粒度 / 反向传播动画。
+
+### ① Attention Q/K/V 分解动画
+
+> 演示模型：`meta-llama/Llama-3-8B`（32 heads, hidden=4096, head_dim=128）
+
+展示完整计算链，**一镜到底**：
 
 ```
-SVG 层级（6 层，借鉴 Netron）:
-  Layer 0: 背景网格（极淡参考线）
-  Layer 1: 层组矩形（GroupNode 边框）
-  Layer 2: 边路径（贝塞尔曲线 + 箭头）
-  Layer 3: 边命中区域（不可见宽路径，用于点击检测）
-  Layer 4: 节点（圆角矩形 + 颜色编码）
-  Layer 5: 标签 + 叠加数据条
-
-布局算法:
-  dagre (Sugiyama 层级布局)
-    - nodesep: 20
-    - ranksep: 50
-    - edgesep: 20
-    - >3000 节点自动降级到 longest-path ranker
-    - Web Worker 中计算布局
+Step 1: tokens (B, S, 4096) 发光紫色张量块从上方流入
+Step 2: 三条并行投影分叉 —— Q / K / V，分别显影为 蓝 / 青 / 绿
+           tokens → W_Q → Q (B, S, 32, 128)
+           tokens → W_K → K (B, S, 32, 128)
+           tokens → W_V → V (B, S, 32, 128)
+Step 3: Q 与 K^T 做矩阵乘 —— 3D 方格矩阵在空中旋转对齐
+           QK^T: (B, 32, S, S)   ← 注意力得分矩阵
+Step 4: Softmax —— 每行以暖色系（玫瑰金 → 橙）渐变高亮，最大值粒子发光
+           attention_weights: (B, 32, S, S)
+Step 5: × V —— 权重矩阵与 V 相乘，粒子流按权重比例分配到 V 的各 token 行
+           output: (B, S, 32, 128) → concat → (B, S, 4096)
+Step 6: output 流回主干（residual add，见 ③）
 ```
 
-#### 2D 节点设计
+**视觉要点**：
+- Q/K/V 三条支流以**材质色区分**（蓝/青/绿 `MeshStandardMaterial`），非 opacity 分层。
+- Softmax 激活格用 **Bloom emissive** 强化最大值感知。
+- 所有张量形状变化用 Drei `<Html>` 标签实时跟随（如 `(B, S, 4096) → (B, 32, S, 128)`）。
+- 每个动作附讲解字幕（毛玻璃 Html overlay）。
+
+### ② MoE 路由动画
+
+> 演示模型：`mistralai/Mixtral-8x7B`（8 experts, top-2）与 `deepseek-ai/DeepSeek-V3`（256 routed + 1 shared, top-8）
+
+```
+Step 1: token 张量 (B, S, hidden) 进入 Gate
+Step 2: Gate Linear → softmax → top-k
+           Mixtral: top-2 of 8
+           DeepSeek-V3: top-8 of 256（+ shared expert 始终激活）
+Step 3: 被选中的 Experts 高亮（橙色 emissive + Bloom outline）；
+        未选中 Expert 降低到 opacity 0.15 的"休眠态"
+Step 4: token 粒子流沿 Gate → 选中 Experts 并行分流（N 条亮色轨迹）
+Step 5: 每个激活 Expert 内部完成 SwiGLU 前向（膨胀/收缩由子动画呈现）
+Step 6: 加权求和 —— 各 Expert 输出按 gate 权重回流、在主干前汇合
+        DeepSeek-V3 额外显示 Shared Expert 的恒定贡献支路
+```
+
+**视觉要点**：
+- Experts 使用 **InstancedMesh**（`count = num_experts`），激活态通过 instance attribute 切换 emissive。
+- Gate top-k 概率条形图悬浮于 Gate 上方（`<Html>` 毛玻璃条）。
+- 权重数字（如 `0.42`）贴在每条支流上，等宽字体 JetBrains Mono。
+
+### ③ Residual flow 动画
+
+> 演示模型：所有三个 Template（A/B/C）均需展示
+
+展示 **residual stream 如何跨 block 传递 + Pre/Post-LN 位置**：
+
+```
+残差主干（贯穿 Embedding → 所有 Decoder Block → Final Norm）:
+  一根半透明发光圆柱，玫瑰金色 #ec4899，始终微微脉动（opacity 0.3~0.5）
+
+每个 Block 内部（以 LLaMA 的 Pre-LN 为例）:
+  x ─┬────────────────────────────────────────────── x + ΔA ──┐
+     │                                                          │
+     └─→ RMSNorm → Attention → ΔA ─────────────────────────────┘
+                                (支流汇回主干：粒子沿弧线回流 + "+" 图标闪烁)
+
+  x + ΔA ─┬────────────────────────────────────── (x + ΔA) + ΔM ──
+          │
+          └─→ RMSNorm → MLP/MoE → ΔM ────────────────────────────┘
+
+Pre-LN 位置标注: RMSNorm 紧贴 Attention/MLP 的 **入口侧**
+Post-LN（若存在）: 标注在汇回点 **出口侧**（目前 v1.0 三个 Template 均 Pre-LN）
+```
+
+**视觉要点**：
+- 残差主干始终可见，是场景的"脊柱"。
+- Pre-LN / Post-LN 用 3D Text 小标签直接贴在 Norm 节点上方。
+- "+" 合并点用一个小八面体 + Bloom，点击可查看张量形状 `(B, S, hidden)` 保持不变的契约。
+
+---
+
+## 5.4 视觉规范（精美硬约束，对齐原则 2）
+
+> 原则 2：**视觉质感必须精美（材质、光照、后处理、微交互、排版、动效经得起截图分享）**。以下为硬约束，不允许"能跑就行"。
+
+### 配色系统（深色优先 + 玫瑰金强调）
+
+**禁止 Tailwind 默认灰阶堆砌**；以下为基线，冷色调主色 + 玫瑰金强调。
+
+```
+═══ 背景层（深色模式默认，无浅色模式 v1.0） ═══
+主背景      #0b1220 (近黑冷蓝)
+次背景      #1e293b (Slate 900 基准主色)
+表面色      #111827 (悬浮卡片背景)
+玻璃拟态    backdrop-blur-md bg-white/10 border-white/15
+
+═══ 强调色（二选一，项目启动时冻结） ═══
+方案 A · 玫瑰金:  #ec4899   ← 残差主干 / 关键高光 / 进度轴
+方案 B · 科技蓝:  #3b82f6   ← 残差主干 / 关键高光 / 进度轴
+（v1.0 冻结：方案 A 玫瑰金，除非后续评审翻案）
+
+═══ 模块类别色（3D 场景内材质 baseColor，禁止更改色相） ═══
+Attention       #3b82f6 (科技蓝)
+MLP             #8b5cf6 (紫)
+MoE Expert      #f97316 (橙)
+Norm            #94a3b8 (灰)
+Embedding       #10b981 (绿)
+
+═══ Provenance 徽标色（见 §5.6） ═══
+EXACT           #22c55e (绿色实心圆)
+INFERRED        #3b82f6 (蓝色空心圆)
+ESTIMATED       #eab308 (黄色三角)
+```
+
+### 材质
+
+所有模块**统一**使用 `MeshStandardMaterial`：
+
+```tsx
+<meshStandardMaterial
+  color={categoryColor}      // 严格按 §配色 模块类别色
+  roughness={0.3}
+  metalness={0.6}            // 轻微金属感
+  envMapIntensity={1.0}
+/>
+```
+
+- **禁止** `MeshBasicMaterial`、**禁止** 默认灰色 PBR。
+- 活跃态：`emissive = categoryColor; emissiveIntensity = 0.3;` + outline pass。
+
+### 光照
+
+使用 Drei `<Environment>` HDR 环境光 + 一个方向光 + 一个点光：
+
+```tsx
+<Environment preset="studio" />   {/* 或 "city" */}
+<directionalLight position={[10, 15, 8]} intensity={0.8} castShadow />
+<pointLight position={[-6, 4, -4]} intensity={0.5} color="#ec4899" />
+```
+
+### 后处理（必选）
+
+使用 `@react-three/postprocessing`：
+
+```tsx
+<EffectComposer>
+  <Bloom threshold={0.9} intensity={0.4} radius={0.8} />
+  <SSAO intensity={1.2} />
+  <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+  <ChromaticAberration offset={[0.0002, 0.0002]} />   {/* 极轻微，可选 */}
+</EffectComposer>
+```
+
+### 微交互
+
+| 交互 | 视觉反馈 |
+|---|---|
+| **悬停节点** | `scale 1.0 → 1.02` + `emissiveIntensity 0 → 0.3` + 外描边发光（Drei `<Outlines>`） |
+| **点击节点** | 点击位置产生 ripple 向外扩散（自定义 shader Ring expanding 600ms）+ 右侧信息面板从右滑入（react-spring `config.gentle`） |
+| **选中态** | Postprocessing `OutlinePass` 高亮选中节点 + 其他节点 opacity 0.6 |
+| **时间轴 scrub** | 按 16ms/frame 重绘，禁止 throttle |
+
+### 排版
+
+```
+UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fallback)
+代码/数字:      "JetBrains Mono", ui-monospace（所有张量形状、数值、shape 元组必须等宽）
+3D 标签层:      Drei <Html> 半透明玻璃拟态
+                className="backdrop-blur-md bg-white/10 border border-white/15
+                           rounded-xl px-3 py-2 text-sm"
+3D 文字:        Drei <Text> + Inter SDF
+```
+
+### 相机
+
+```tsx
+<PerspectiveCamera fov={45} position={[0, 20, 40]} makeDefault />
+<OrbitControls
+  enableDamping
+  dampingFactor={0.05}
+  makeDefault
+/>
+```
+
+- 相机阻尼必开；禁止 `dampingFactor=0`。
+- 初始视角：俯视偏前，Y=20, Z=40，看向原点。
+
+### 动效缓动
+
+- **所有过渡必须用** GSAP `power2.inOut` **或** react-spring `config.gentle`。
+- **禁止 `linear`**（除非是恒速循环粒子发射，且必须显式注释）。
+- 默认过渡时长：组件展开 600ms / 面板滑入 300ms / 悬停 200ms。
+
+---
+
+## 5.5 Template A/B/C/G 视觉设计（对齐原则 8）
+
+| 模板 | 目标模型族 | 3D 视觉结构 | Provenance |
+|---|---|---|---|
+| **A** | `meta-llama/Llama-3-8B` / `Qwen/Qwen2.5-7B`（LLaMA 族 Decoder） | 垂直堆叠 Decoder Block × N；每 Block 内 **Attention（左）∥ MLP（右）** 并列，residual 主干居中 | EXACT（全部字段来自 config + safetensors） |
+| **B** | `mistralai/Mixtral-8x7B`（LLaMA-MoE） | 在 A 的基础上 **MLP → MoE 扇形展开**：Gate 位于分支入口，N 个 Expert 围绕 Gate 呈扇形排列（Mixtral=8，呈半圆；更多 experts 使用径向网格） | EXACT |
+| **C** | `deepseek-ai/DeepSeek-V3`（DeepSeek-MoE） | 在 B 的基础上新增三项：<br>• **MLA 压缩头**：Attention 区显示双锥漏斗（q_lora / kv_lora 压缩维度可视化）<br>• **Shared Expert**：独立大块，位于 Routed Experts 扇形**外侧**，始终激活（emissive 常亮）<br>• **Routed Experts 分组**：按 expert_group 着色微差（同组同色深浅） | EXACT |
+| **G** | 通用回退（任何未识别 `*ForCausalLM`） | • 仅展示 **config 已知字段**对应节点（num_layers / hidden_size / vocab_size / num_heads 若存在）<br>• 通用 Decoder 骨架（Embedding → N × Block → Norm → LM Head）<br>• **醒目全局 `INFERRED` 徽标**（右上角大号）<br>• **免责浮层**：顶部条幅："⚠ 该架构未识别，仅基于 config 字段推断" —— 点击关闭后仍保留徽标 | INFERRED |
+
+**切换策略**：`ArchitectureAdapter.detect()` 判定返回 `template_id`，前端 `TemplateContract.canRender()` 匹配后挂载对应 `<Scene>`。Template G 永远兜底，**禁止**默认回退到 A 伪装 LLaMA。
+
+---
+
+## 5.6 Provenance 徽标规范（对齐原则 9）
+
+### 5.6.1 节点级徽标
+
+每个模块节点的**右上角**以 Drei `<Html>` 形式显示徽标：
+
+| Provenance | 形状 | 颜色 | 说明 |
+|---|---|---|---|
+| `EXACT` | 实心圆 ● | 绿 `#22c55e` | 来自 config + safetensors 的确切字段 |
+| `INFERRED` | 空心圆 ○ | 蓝 `#3b82f6` | 基于 model_type 或启发式推断 |
+| `ESTIMATED` | 三角 ▲ | 黄 `#eab308` | 基于公式估计（如 activations/KV cache 估算） |
+
+**悬停徽标 → Tooltip** 显示 Provenance 详情：
 
 ```
 ┌─────────────────────────────────────┐
-│ ▼ MLA Attention                [📋] │  ← 头部: 类型图标 + 名称 + 展开/折叠按钮
+│  ▲ ESTIMATED                         │
 ├─────────────────────────────────────┤
-│ 类型: DeepseekV3Attention          │  ← 属性区
-│ 参数: 101.12M (9.8%)              │
-│ ████████████████░░░░  101.12M      │  ← NDP 数据条
-├─────────────────────────────────────┤
-│ 输入: (B, S, 7168)                 │  ← 端口区
-│ 输出: (B, S, 7168)                 │
+│  source:  memory_estimator.v1       │
+│  caveats: 基于 bsz=1, seq=4096      │
+│           激活值按 checkpointing=off │
+│           估算；真实训练可能 ±20%    │
 └─────────────────────────────────────┘
-
-颜色编码（同 3D）:
-  Attention: #4a9eff 蓝色边框 + 浅蓝底
-  MLP:       #34d399 绿色边框 + 浅绿底
-  MoE:       #f59e0b 橙色边框 + 浅橙底
-  Norm:      #fbbf24 黄色边框 + 浅黄底
-  Embedding: #a78bfa 紫色边框 + 浅紫底
-  Vision:    #22d3ee 青色边框 + 浅青底
 ```
 
-#### 2D 数据流动画
+### 5.6.2 全局 Provenance Summary
+
+右侧浮动面板**顶部**显示全局 `provenance_summary`（由后端 ModuleGraph 汇总）：
 
 ```
-2D 模式的数据流不使用粒子，而是使用:
-  - SVG 路径动画: strokeDashoffset 驱动的"线条绘制"效果
-  - 渐变路径: 线性渐变从源节点色到目标节点色
-  - 脉冲效果: 边上的亮点沿路径移动（SVG <animateMotion>）
-  - 残差连接: 虚线 + 半透明
-  - Hover 高亮: 选中节点的所有输入边=绿色，输出边=红色
+┌─ Provenance Summary ────────────────────┐
+│  Template: C (DeepSeek-V3)              │
+│  ● EXACT:     142 nodes                  │
+│  ○ INFERRED:  3 nodes                    │
+│  ▲ ESTIMATED: 2 fields (activations,    │
+│                         kv_cache)       │
+│  Source: config.json + safetensors      │
+│  Revision: 1                             │
+└─────────────────────────────────────────┘
 ```
 
-#### 2D 专属功能
+**禁止**：任何"估算即展示，不标来源"的设计。凡是屏幕上的数字/箭头/结构，必须能追溯。
 
-| 功能 | 说明 |
-|---|---|
-| **SVG 导出** | 内联 CSS 的自包含 SVG，可直接用于论文 |
-| **分屏对比** | 两个模型并排 SVG 面板，同步导航 |
-| **层级颜色条** | 折叠层底部的子节点颜色分布条 |
-| **平铺全部层** | 移除所有分组，展示原始节点连接 |
-| **弹出层窗口** | 多个可移动面板同时查看不同层内部 |
-| **边叠加层** | 自定义 JSON 定义的额外边集合 |
+---
 
-### 6.1 3D 模式设计（主体，保持原有设计）
+## 5.7 Config 编辑器 UI 规范（对齐原则 6 PATCH /config）
 
 ```
-相机默认视角：45° 俯视，距离中心 15 单位
-
-纵向堆叠布局（Y 轴向下为推理方向）：
-
-       ┌──────────────┐
-       │  Embedding   │ ← 紫色 RoundedBox
-       │ (163840×7168)│
-       └──────┬───────┘
-              │ 发光连线
-       ┌──────┴───────┐
-       │  Layer 0     │ ← 展开后看到:
-       │  (Dense)     │   ┌──────┐ ┌──────┐
-       └──────┬───────┘   │ MLA  │ │ MLP  │
-              │           │ (蓝) │ │ (绿) │
-              │           └──────┘ └──────┘
-       ┌──────┴──────────────────────────┐
-       │  Layers 1-60 (MoE × 60)        │ ← 折叠显示为单块
-       │  点击展开 ↓                      │
-       │  ┌─────────┐  ┌────────────────┐│
-       │  │  MLA    │  │  MoE Block     ││
-       │  │ Attn    │  │ ┌──────────────┐││
-       │  │  (蓝)   │  │ │  24×16 专家  │││ ← InstancedMesh
-       │  │         │  │ │  网格 (384)  │││
-       │  └─────────┘  │ └──────────────┘││
-       │               │ + 共享专家(大块) ││
-       │               └────────────────┘│
-       └──────┬──────────────────────────┘
-              │
-       ┌──────┴───────┐
-       │  RMSNorm     │ ← 黄色
-       └──────┬───────┘
-       ┌──────┴───────┐
-       │  LM Head     │ ← 紫色
-       │ (7168→163840)│
-       └──────────────┘
-
-多模态分支（X 轴偏移 -5）：
-
-  ┌─────────────┐
-  │ MoonViT     │ ← 青色
-  │ (27层 ViT)  │
-  └──────┬──────┘
-  ┌──────┴──────┐
-  │ PatchMerger │ ← 青色
-  │ (投影器)    │
-  └──────┬──────┘
-         │ 粒子流汇入主干
-         └──────────→ Embedding 之后
+┌─ Config Editor (浮动右侧) ──────────────────────┐
+│                                                  │
+│  Model: deepseek-ai/DeepSeek-V3                  │
+│  Template: C                                      │
+│                                                  │
+│  num_hidden_layers        61   → 61              │
+│    ──●────────────── [slider 1-128]              │
+│                                                  │
+│  hidden_size            7168   → 7168            │
+│    [input number]                                 │
+│                                                  │
+│  num_experts             256   → 128  (修改中)   │
+│    [input number]        ⟳ 重算中...              │
+│                                                  │
+│  num_experts_per_tok       8   → 8               │
+│    [input number]                                 │
+│                                                  │
+│  moe_top_k                 8   → 8               │
+│    ...                                            │
+│                                                  │
+│  [⟲ Reset to original config]                     │
+└──────────────────────────────────────────────────┘
 ```
 
-### 6.1.1 深度借鉴 LLM Viz 的 3D 实现细节
+**行为约束**：
 
-LLM Viz 是目前 3D 模型可视化领域的标杆，以下逐项深度借鉴其核心技术并适配到 R3F 体系：
+1. 字段变化 → **300ms debounce** → `PATCH /api/v1/stream/{org}/{repo}/config`。
+2. 请求中显示 **loading spinner**（玫瑰金色旋转环）；端到端必须 **< 300ms**（原则 5 例外条款硬约束）。
+3. 每个字段旁显示 **"原值 → 当前值"**；当前值与原值不同时以玫瑰金强调色高亮。
+4. **Reset 按钮**恢复到原 config（触发一次 PATCH，overrides=空）。
+5. 白名单字段严格对齐 [11-extension-points.md §8.1](11-extension-points.md)。
 
-#### A. 3D 空间隐喻（核心布局哲学）
+---
 
-```
-LLM Viz 原始设计:
-  - Y 轴 (向下): 推理方向 (token 从上到下穿越各层)
-  - X 轴 (水平): 计算分支 (Attention 向左, MLP 向右)
-  - Z 轴 (深度): 并行结构 (多个注意力头沿 Z 轴展开)
-
-我们的适配 (支持更复杂的架构):
-  - Y 轴 (向下): 推理方向 — 保持不变
-  - X 轴 (水平):
-    - 左: Attention 分支
-    - 中: 残差主干 (Residual Stream) — 直线垂直主干
-    - 右: MLP/MoE 分支
-    - 远左: 多模态分支 (Vision/Audio Encoder)
-  - Z 轴 (深度):
-    - 注意力头 (64 heads) 沿 Z 轴排列
-    - MoE 专家 (384 experts) 在 XZ 平面形成网格
-    - MLA 漏斗在 Z 方向展示压缩/解压
-
-空间语义:
-  - 越靠近 Y 轴主干 = 越核心的计算
-  - X 距离主干越远 = 越专项的计算
-  - Z 深度越大 = 并行度越高
-```
-
-#### B. 残差流 (Residual Stream) 可视化
+## 5.8 GPU 选择器 UI 规范（对齐原则 6 GPU Catalog）
 
 ```
-借鉴 LLM Viz 的核心创新: 将残差连接渲染为贯穿整个模型的"垂直主干"
+┌─ GPU Selector (顶部工具栏下拉) ────────────────────────────┐
+│  ⚡ GPU: A100-80G (80GB, 2TB/s, 312 TFLOPS BF16)  ▼        │
+└────────────────────────────────────────────────────────────┘
 
-实现方式 (R3F):
-  <group name="residual-stream">
-    // 半透明发光圆柱体，从 Embedding 贯穿到 LM Head
-    <Cylinder args={[0.15, 0.15, totalHeight]} position={[0, -totalHeight/2, 0]}>
-      <meshPhysicalMaterial
-        color="#818cf8"
-        transparent opacity={0.3}
-        emissive="#818cf8" emissiveIntensity={0.15}
-        transmission={0.4}
-      />
-    </Cylinder>
-
-    // 每一层在主干上标记一个节点（发光环）
-    {layers.map((_, i) => (
-      <Ring args={[0.2, 0.35, 32]} position={[0, -layerY(i), 0]} rotation={[Math.PI/2, 0, 0]}>
-        <meshBasicMaterial color="#818cf8" transparent opacity={0.5} />
-      </Ring>
-    ))}
-  </group>
-
-视觉效果:
-  - Attention/MLP 计算作为"分支"从主干伸出
-  - 计算完成后结果"汇回"主干
-  - 整个推理过程 = 信号沿主干向下传播，每层被分支"加工"一次
-  - 残差主干始终微微发光，表示信息持续流动
+下拉展开（从 GET /api/v1/gpus 动态拉取）:
+┌────────────────────────────────────────────────────────────┐
+│  NVIDIA                                                      │
+│    A100-40G   (40GB,  1.5TB/s, 312 TFLOPS BF16)            │
+│  ✓ A100-80G   (80GB,  2.0TB/s, 312 TFLOPS BF16)            │
+│    H100-80G   (80GB,  3.4TB/s, 989 TFLOPS BF16)            │
+│    H200-141G  (141GB, 4.8TB/s, 989 TFLOPS BF16)            │
+│    B200       (192GB, 8.0TB/s, 2250 TFLOPS BF16)           │
+│    4090-24G   (24GB,  1.0TB/s, 165 TFLOPS BF16)            │
+│    3090-24G   (24GB,  0.9TB/s, 71 TFLOPS BF16)             │
+│    L40S-48G   (48GB,  0.9TB/s, 362 TFLOPS BF16)            │
+│  国产                                                        │
+│    昇腾 910B  (64GB,  ...)                                  │
+│    寒武纪 MLU370 (...)                                      │
+│    昆仑芯 P800 / R200 (...)                                 │
+└────────────────────────────────────────────────────────────┘
 ```
 
-#### C. 多 Pass 渲染 + 选择性 Bloom
+**行为约束**：
 
-```
-借鉴 LLM Viz 的 8 Pass 渲染管线，简化为 R3F 4 层:
+1. 选项显示格式：`<name> (<mem>, <bandwidth>, <tflops> BF16)`。
+2. 选择后自动触发 `PATCH /config` 携带 `gpu_id` → MemoryEstimator 重算 → 右侧 MemoryBreakdown 面板实时更新。
+3. 清单完全从 `backend/data/gpu-catalog.yaml` 加载，**禁止**前端硬编码 GPU 列表。
 
-Pass 1 — 几何层 (Opaque):
-  层块 RoundedBox + 连线 + 残差主干
-  渲染顺序: renderOrder={0}
-  Bloom 层: layers.set(0) — 不参与 Bloom
+---
 
-Pass 2 — 发光层 (Emissive):
-  活跃模块 + 数据流粒子 + MoE 激活专家
-  Bloom 层: layers.set(1) — 参与 Bloom
-  通过 <SelectiveBloom> 只对这一层施加辉光
-
-Pass 3 — 标签层 (Overlay):
-  <Html> overlay 信息面板
-  <Text> 3D 文字标签
-  渲染顺序: renderOrder={10}
-
-Pass 4 — 后处理:
-  // 默认 (Mac 集成 GPU): 仅 Bloom
-  <EffectComposer>
-    <Bloom luminanceThreshold={0.8} intensity={1.5} radius={0.4} />
-  </EffectComposer>
-
-  // 高端 GPU 自动升级: + Vignette + ChromaticAberration + Noise
-  // （通过 renderer.capabilities 检测，v1.1 实现三档自动降级）
-
-关键: 按需渲染 (borrowing LLM Viz):
-  <Canvas frameloop="demand" ...>
-  // 仅在状态变化时重绘，idle 时 0 GPU 负载
-  // 通过 invalidate() 手动触发重绘
-```
-
-#### D. 多尺度网格线 + LOD 系统
-
-```
-借鉴 LLM Viz 的多尺度 GLSL 网格:
-
-3D 地面参考网格:
-  <gridHelper args={[100, 100]} position={[0, groundY, 0]}>
-    // 主网格线 (每 16 格): opacity 0.1
-    // 次网格线 (每 1 格): opacity 0.03
-    // 通过相机距离动态调整可见性
-
-双重 LOD 策略 (借鉴 LLM Viz):
-
-  LOD Level 0 (远距离 — 相机距离 > 30):
-    - 所有层块合并为单色条
-    - 隐藏所有文字标签
-    - 60 个 MoE 层显示为一个带数字 "×60" 的块
-    - 连线简化为直线
-    - >12 层自动分列排列（防止过长单列，借鉴 LLM Viz）
-
-  LOD Level 1 (中距离 — 相机距离 10-30):
-    - 每层显示为独立块体 + 颜色编码
-    - 显示层编号 + 类型名称
-    - MoE 网格显示为单个块（标注 "384 experts"）
-    - 连线显示箭头方向
-
-  LOD Level 2 (近距离 — 相机距离 < 10):
-    - 展开层内部结构（Attention + MLP/MoE）
-    - 显示完整参数标注
-    - MoE 展开为 24×16 网格
-    - MLA 显示漏斗结构
-    - 粒子数据流可见
-
-  LOD 过渡:
-    - 使用 Drei <LOD> 组件 + 自定义距离阈值
-    - 过渡时材质 opacity 渐变 (300ms)
-    - 远距离节点颜色混向背景色 (借鉴 Model Explorer)
-```
-
-#### E. 块体光照模型 (Block Lighting)
-
-```
-借鉴 LLM Viz 的块体专用光照:
-
-每个 3D 层块的 6 个面使用不同亮度:
-  顶面: 1.0 × baseColor (最亮，接收主方向光)
-  前面: 0.85 × baseColor
-  侧面: 0.70 × baseColor
-  底面: 0.50 × baseColor (最暗)
-
-R3F 实现:
-  <RoundedBox args={[width, height, depth]} radius={0.1} smoothness={4}>
-    <meshStandardMaterial
-      color={moduleColor}
-      metalness={0.15}
-      roughness={0.25}
-      // 默认 MeshStandardMaterial (Mac GPU)
-      // 高端 GPU 升级为 MeshPhysicalMaterial + clearcoat + transmission
-      envMapIntensity={0.5}
-    />
-  </RoundedBox>
-
-活跃状态 (Hover/Selected):
-  // 添加 emissive + 轮廓发光
-  emissive={moduleColor}
-  emissiveIntensity={isActive ? 0.4 : isHover ? 0.2 : 0}
-  // 外加一个稍大的透明外壳 (glow shell)
-  <RoundedBox args={[width+0.02, height+0.02, depth+0.02]}>
-    <meshBasicMaterial
-      color={moduleColor}
-      transparent opacity={isActive ? 0.15 : 0}
-      side={BackSide}  // 只渲染内表面
-    />
-  </RoundedBox>
-```
-
-#### F. 线程连线渲染 (Thread Rendering)
-
-```
-借鉴 LLM Viz 的数据连线风格:
-
-主数据流连线:
-  <QuadraticBezierLine
-    start={sourcePos} end={targetPos}
-    mid={midPoint}  // 微微弯曲，避免与块体重叠
-    color={flowColor}
-    lineWidth={2}
-    transparent opacity={0.6}
-    // 加上发光效果
-    onUpdate={(line) => { line.material.emissive = flowColor; line.material.emissiveIntensity = 0.3 }}
-  />
-
-残差连接线 (borrowing LLM Viz 的虚线残差):
-  <Line
-    points={[layerTop, layerBottom]}
-    color="#818cf8"
-    lineWidth={1}
-    dashed
-    dashSize={0.1}
-    gapSize={0.05}
-    transparent opacity={0.4}
-  />
-
-分支连线 (Attention ← 主干 → MLP):
-  水平弯曲贝塞尔，表示数据从主干"分流"到计算分支
-
-汇合连线 (计算结果 → + residual → 主干):
-  箭头指向主干，表示结果与残差相加
-
-连线动画:
-  - 生长效果: 新连线从起点"画"向终点 (GSAP drawSVG 概念映射到 3D)
-  - 数据流脉冲: 周期性亮度变化沿连线传播 (shader uniform)
-```
-
-#### G. 弹簧物理相机 (Spring Camera)
-
-```
-借鉴 LLM Viz 的临界阻尼相机系统:
-
-参数 (直接借鉴):
-  mass: 1
-  tension: 170    // 弹簧刚度
-  friction: 2 * sqrt(1 * 170) ≈ 26  // 临界阻尼
-  过渡时间: ~667ms
-
-R3F 实现:
-  import { useSpring } from '@react-spring/three'
-  import { CameraControls } from '@react-three/drei'
-
-  const cameraRef = useRef<CameraControls>()
-
-  // 点击模块时飞向目标
-  const flyTo = (targetPos: Vector3, targetLookAt: Vector3) => {
-    cameraRef.current?.setLookAt(
-      targetPos.x, targetPos.y + 3, targetPos.z + 8,  // 相机位置
-      targetLookAt.x, targetLookAt.y, targetLookAt.z,  // 看向目标
-      true  // 启用平滑过渡
-    )
-  }
-
-  // Guided Tour 中的相机轨迹
-  const tourPath = [
-    { pos: [0, 5, 20], lookAt: [0, 0, 0], duration: 2 },      // 全景
-    { pos: [0, 2, 8],  lookAt: [0, -1, 0], duration: 1.5 },   // Embedding
-    { pos: [-2, -5, 6], lookAt: [-2, -6, 0], duration: 2 },    // Layer 0
-    { pos: [3, -8, 5],  lookAt: [3, -9, 0], duration: 2 },     // MoE 网格
-    // ...
-  ]
-
-球坐标系统 (borrowing LLM Viz):
-  // 用户拖拽时使用球坐标而非笛卡尔坐标
-  // 保证旋转始终以模型中心为轴心
-  // OrbitControls 已内置此行为
-```
-
-#### H. 多列布局换行
-
-```
-借鉴 LLM Viz 的分列策略:
-
-当 num_layers > 12 时自动分列:
-
-  单列 (≤12 层):        双列 (13-24 层):       三列 (25-36 层):
-  ┌─────┐               ┌─────┐ ┌─────┐       ┌─────┐ ┌─────┐ ┌─────┐
-  │  L0 │               │  L0 │ │ L13 │       │  L0 │ │ L13 │ │ L25 │
-  │  L1 │               │  L1 │ │ L14 │       │  L1 │ │ L14 │ │ L26 │
-  │ ... │               │ ... │ │ ... │       │ ... │ │ ... │ │ ... │
-  │ L11 │               │ L12 │ │ L24 │       │ L12 │ │ L24 │ │ L35 │
-  └─────┘               └─────┘ └─────┘       └─────┘ └─────┘ └─────┘
-
-  列间有连线: 第一列底部 → 第二列顶部（弯曲贝塞尔）
-
-  Kimi-K2.6 (61 层) → 4 列:
-  列1: L0-L15 | 列2: L16-L30 | 列3: L31-L45 | 列4: L46-L60
-  每列间距: X 偏移 6 单位
-  列间连线: 从上一列底部弯向下一列顶部
-
-  相同层自动检测 (borrowing Model Explorer):
-  - 选中 Layer 5 (MoE) → 自动虚线高亮 Layer 1-60 所有同结构层
-  - Layer 0 (Dense) 不被高亮（结构不同）
-  - 折叠显示: "Layer 1-60 (×60, 相同结构)" 带展开按钮
-```
-
-### 6.2 交互设计
+## 5.9 交互设计
 
 | 操作 | 效果 |
 |---|---|
-| **鼠标拖拽** | 旋转 3D 场景（OrbitControls） |
-| **滚轮** | 缩放（平滑过渡） |
-| **点击层块** | 展开子模块（GSAP 动画：子块从中心向外扩散） |
-| **再次点击** | 折叠回去 |
-| **Hover 层块** | 高亮发光 + Html overlay 显示简要信息 |
-| **点击 MoE 块** | 展开 384 专家网格 |
-| **点击单个专家** | Html overlay 显示专家参数详情 |
-| **播放按钮** | 相机飞越 + 数据流粒子动画 |
-| **时间轴拖动** | 跳到推理的任意步骤 |
-| **侧边栏** | 模型信息、参数统计、配置详情 |
+| 鼠标拖拽 | 旋转 3D 场景（`OrbitControls` + damping 0.05） |
+| 滚轮 | 缩放（平滑过渡） |
+| 点击层块 | 展开子模块（L1 StructureAnimation：子块从中心向外扩散 600ms，GSAP `power2.inOut`） |
+| 再次点击 | 折叠回去 |
+| Hover 层块 | scale 1.02 + emissive 0.3 + 外描边发光 + `<Html>` 简要信息 |
+| 点击 MoE 块 | 展开 Expert 扇形（Mixtral 8 / DeepSeek-V3 256） |
+| 点击单个专家 | 信息面板滑入显示 expert 参数 + Provenance |
+| 点击徽标 | Tooltip 显示 source / caveats |
+| 播放按钮 | Guided Tour：相机飞越 + L2 数据流动画自动串联播放 |
+| 时间轴 scrub | 16ms/frame 重绘；支持跳到任意步骤 |
+| AnimationLayer 开关 | 独立 toggle L1/L2；L3/L4 锁定态（v1.1/v1.2） |
 
-### 6.3 MoE 3D 专家网格
+---
 
-```
-384 个专家排列为 24×16 3D 网格：
+## 5.10 WebGL 不可用 Fallback
 
-  InstancedMesh (单次 draw call)
-  ┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐
-  ├─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┤  × 24 行
-  ├─┼─┼─╋═╋─┼─┼─╋═╋─┼─┼─╋═╋─┼─┼─╋═╋  ← 8 个活跃专家(亮色+bloom)
-  ├─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┤
-  └─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
-
-  活跃专家: 亮色 + emissive + Bloom
-  非活跃:   暗色半透明 (opacity: 0.2)
-  共享专家: 独立大块，始终亮 (旁边标注 "Always Active")
-```
-
-### 6.4 MLA 3D 漏斗
+> **原则 5 例外**：本节不是"性能降级"（已按产品原则删除 LOD 降级设计），而是 WebGL 完全不可用时的**底线可访问性**。
 
 ```
-3D 漏斗几何体（CylinderGeometry 变形）：
-
-  ┌────────────────────┐  ← 宽 (7168)
-  │   kv_a_proj_with   │
-  │       _mqa         │
-  └────────┬───────────┘
-           │
-     ┌─────┴─────┐        ← 窄 (576 = 512 + 64)
-     │ kv_latent  │          "KV Cache 只需缓存这里"
-     │ + k_rope   │          ← 黄色高亮标注
-     └─────┬─────┘
-           │
-  ┌────────┴───────────┐  ← 宽 (16384)
-  │    kv_b_proj       │
-  │ k_nope(128) v(128) │
-  └────────────────────┘
-
-  粒子动画：发光点从宽口进入 → 挤压通过窄口 → 从另一端宽口出来
-  标注："28.4:1 压缩比"
-```
-
-### 6.5 端到端 3D 数据流可视化
-
-整个推理过程分为三个阶段，每个阶段都有独立的 3D 可视化和自动动画：
-
-#### 阶段一：数据预处理（Input → Embedding）
-
-```
-═══════════════════ 数据入口区域（场景顶部） ═══════════════════
-
-  ┌──────────────────────────────────────────────┐
-  │           📝 输入文本 (3D 浮动文字)           │
-  │   "Hello, how are you today?"                │
-  │   ↓                                          │
-  │   ┌──────────────────────────────┐            │
-  │   │  Tokenizer (3D 切割动画)     │ ← 白色半透明
-  │   │  文本 → ["Hello", ",", ...]  │
-  │   │  动画: 文字被"切割刀"分段    │
-  │   └──────┬───────────────────────┘            │
-  │          │                                    │
-  │   ┌──────┴──────────────────────────────────┐ │
-  │   │  Token IDs (3D 数字方块阵列)             │ │
-  │   │  [15496, 11, 703, 389, 345, 1909, 30]   │ │
-  │   │  每个 token 是一个小方块，上面显示 ID     │ │
-  │   │  动画: 方块从文字位置飞入排列            │ │
-  │   └──────┬──────────────────────────────────┘ │
-  │          │                                    │
-  │   ┌──────┴──────────────────────────────────┐ │
-  │   │  Embedding Lookup (3D 矩阵切片动画)     │ │
-  │   │  163840 × 7168 大矩阵 (紫色半透明)      │ │
-  │   │  动画: Token ID 方块射入矩阵 →           │ │
-  │   │  对应行高亮发光 → 行向量"抽出"为         │ │
-  │   │  → (B, 7, 7168) 3D 张量块                │ │
-  │   └──────┬──────────────────────────────────┘ │
-  │          │                                    │
-  │   ┌──────┴──────────────────────────────────┐ │
-  │   │  + Position Embedding (YaRN RoPE)       │ │
-  │   │  动画: 正弦波形 3D 表面叠加到向量上      │ │
-  │   │  旋转螺旋效果表示旋转位置编码            │ │
-  │   └──────┬──────────────────────────────────┘ │
-  └──────────│────────────────────────────────────┘
-             ↓
-    inputs_embeds: (B, S, 7168) → 进入主干
-
-  ═══ 多模态分支（如有图像/视频输入）═══
-
-  ┌──────────────────────────────────┐
-  │  🖼️ 输入图像 (3D 纹理平面)       │
-  │  动画: 图像飘入场景               │
-  │  ↓                                │
-  │  Patch 切割 (16×16 网格动画)      │
-  │  动画: 图像被网格线"切割"为 patch  │
-  │  ↓                                │
-  │  MoonViT 编码 (27 层动画)         │
-  │  ↓                                │
-  │  PatchMerger (2×2 合并动画)       │
-  │  每 4 个 patch 合并为 1 个         │
-  │  ↓                                │
-  │  Linear 投影 (4608 → 7168)        │
-  │  颜色从青色渐变为紫色             │
-  └──────────┬───────────────────────┘
-             │ 粒子流汇入主干
-             └──→ masked_scatter 到 inputs_embeds
-```
-
-#### 阶段二：模型内部数据流转（Decoder Layers）
-
-```
-═══════════════════ 主干推理区域（场景中部） ═══════════════════
-
-  inputs_embeds: (B, S, 7168) → 3D 张量块（紫色）
-             │
-             │ 数据流粒子开始
-             ▼
-  ┌─────────────────────────────────────────────┐
-  │  Layer 0 (Dense) — 展开内部:                 │
-  │                                              │
-  │  ┌─ RMSNorm ──────────────────────────────┐  │
-  │  │  动画: 张量块"脉动"表示归一化           │  │
-  │  └─────────┬──────────────────────────────┘  │
-  │            ↓                                  │
-  │  ┌─ MLA Attention (蓝色区域) ──────────────┐  │
-  │  │                                          │  │
-  │  │  Q 路径:                                 │  │
-  │  │  (B,S,7168) →[下投影]→ (B,S,1536)        │  │
-  │  │  →[RMSNorm]→ [上投影]→ (B,S,64,192)      │  │
-  │  │  → 分裂为 nope(128) + rope(64)            │  │
-  │  │  → 螺旋动画: RoPE 旋转                    │  │
-  │  │                                          │  │
-  │  │  KV 路径 (MLA 漏斗 3D 动画):              │  │
-  │  │  (B,S,7168) →[压缩]→ (B,S,576)           │  │
-  │  │  黄色高亮: "KV Cache 576 dim"             │  │
-  │  │  →[解压]→ (B,S,64,256)                    │  │
-  │  │                                          │  │
-  │  │  Attention 计算:                          │  │
-  │  │  Q×K^T → Softmax → ×V                    │  │
-  │  │  动画: 注意力权重热力图（悬浮 2D 面板）    │  │
-  │  │                                          │  │
-  │  │  → o_proj → (B, S, 7168)                  │  │
-  │  └─────────┬────────────────────────────────┘  │
-  │            ↓ + residual (虚线回路)              │
-  │  ┌─ RMSNorm ──────────────────────────────┐  │
-  │  └─────────┬──────────────────────────────┘  │
-  │            ↓                                  │
-  │  ┌─ Dense MLP (绿色区域) ─────────────────┐  │
-  │  │  gate(7168→18432) → SiLU               │  │
-  │  │  up(7168→18432)                         │  │
-  │  │  → 张量块"膨胀"动画 (7168 → 18432)     │  │
-  │  │  → SiLU × up → down(18432→7168)        │  │
-  │  │  → 张量块"收缩"回 7168                  │  │
-  │  └─────────┬──────────────────────────────┘  │
-  │            ↓ + residual                       │
-  └────────────│──────────────────────────────────┘
-               ↓
-  ┌─────────────────────────────────────────────────────┐
-  │  Layers 1-60 (MoE × 60) — 折叠/展开:                │
-  │                                                      │
-  │  折叠态: 60 层堆叠为一个大块，粒子快速穿过            │
-  │  展开单层: 同 Layer 0 的 Attention + MoE 替代 MLP     │
-  │                                                      │
-  │  ┌─ MoE 路由动画 ────────────────────────────────┐   │
-  │  │  (B,S,7168) → Gate Linear → sigmoid 评分       │   │
-  │  │  动画: 384 维评分条形图实时"生长"               │   │
-  │  │  → Top-8 选择: 8 个专家发光点亮                 │   │
-  │  │  → 归一化 × 2.827                               │   │
-  │  │                                                  │   │
-  │  │  数据分流动画:                                   │   │
-  │  │  粒子流从 Gate 分裂为 8 条支流                    │   │
-  │  │  → 8 个活跃专家各接收一条支流                    │   │
-  │  │  → 每个专家内部: SwiGLU 膨胀/收缩               │   │
-  │  │  → 8 条支流汇合 + 加权求和                       │   │
-  │  │  + 共享专家始终处理完整流（独立大块）             │   │
-  │  │  → 两路合并输出                                  │   │
-  │  └──────────────────────────────────────────────┘   │
-  └─────────────────────────────────────────────────────┘
-```
-
-#### 阶段三：最终输出可视化（Norm → LM Head → Tokens）
-
-```
-═══════════════════ 输出区域（场景底部） ═══════════════════
-
-  ┌──────────────────────────────────────────────┐
-  │  Final RMSNorm                                │
-  │  动画: 张量块最后一次"脉动"归一化             │
-  │  (B, S, 7168) → (B, S, 7168)                 │
-  └──────┬───────────────────────────────────────┘
-         │
-  ┌──────┴───────────────────────────────────────┐
-  │  LM Head (7168 → 163840)                     │
-  │  3D 可视化: 张量块急剧"膨胀"                  │
-  │  7168 维 → 163840 维（词表大小）              │
-  │  动画: 窄长条扩展为宽巨幅面板                 │
-  │  颜色: 从内部颜色渐变到紫色                   │
-  └──────┬───────────────────────────────────────┘
-         │
-  ┌──────┴───────────────────────────────────────┐
-  │  Logits → Softmax (概率分布可视化)            │
-  │                                               │
-  │  3D 柱状图 / 粒子喷泉:                        │
-  │  ┌─────────────────────────────────────┐      │
-  │  │  163840 个 token 概率                │      │
-  │  │  Top-K 突出显示:                     │      │
-  │  │                                      │      │
-  │  │  ████████████ "you"     (p=0.32)    │      │
-  │  │  ████████     "doing"   (p=0.18)    │      │
-  │  │  ██████       "today"   (p=0.12)    │      │
-  │  │  ████         "?"       (p=0.08)    │      │
-  │  │  ███          "feeling" (p=0.06)    │      │
-  │  │  ·····(其余概率极小，半透明)·····    │      │
-  │  │                                      │      │
-  │  │  3D 效果: Top 词汇的柱状条从平面     │      │
-  │  │  "生长"出来，高度=概率，颜色=置信度  │      │
-  │  │  最高概率的柱子发光 + Bloom           │      │
-  │  └─────────────────────────────────────┘      │
-  │                                               │
-  │  采样动画:                                     │
-  │  一个发光粒子从概率分布中"被选中"              │
-  │  → 飞到输出文字区域                            │
-  │  → 显示为生成的 token: "you"                   │
-  └───────────────────────────────────────────────┘
-         │
-  ┌──────┴───────────────────────────────────────┐
-  │  📤 输出文本 (3D 浮动文字)                    │
-  │  "you" ← 新生成的 token 以打字机效果出现      │
-  │                                               │
-  │  自回归循环（可选动画）:                        │
-  │  新 token 反馈到顶部 → 再次走完整流程          │
-  │  粒子从底部回流到顶部，循环动画                │
-  └───────────────────────────────────────────────┘
-```
-
-#### 自动动画播放模式
-
-**"Guided Tour" 自动播放**（借鉴 LLM Viz 的 walkthrough 系统）：
-
-```
-时间轴控制条:  ◀ ⏸ ▶  ───●──────────────── 2:30 / 5:00
-
-步骤编排（GSAP Master Timeline）:
-
-  T=0s   相机俯瞰全貌 → 淡入标题 "端到端推理流程"
-  T=3s   相机飞向输入区 → 文字输入动画 → Tokenizer 切割
-  T=8s   Token ID 方块排列 → 飞入 Embedding 矩阵
-  T=12s  相机跟随 → Embedding 向量"抽出" → 位置编码叠加
-  T=16s  （多模态）相机切到视觉分支 → 图像 Patch 切割 → ViT 编码
-  T=22s  视觉粒子汇入主干 → 相机回到主流
-  T=25s  相机进入 Layer 0 → Attention 展开
-  T=30s  MLA 漏斗动画 → Q/K/V 路径分离与合并
-  T=38s  → Dense MLP 膨胀/收缩
-  T=42s  相机进入 MoE 层 → Gate 评分动画 → 专家网格点亮
-  T=48s  数据分流 → 8 专家并行处理 → 汇合
-  T=55s  快进穿越 Layer 2-59（粒子加速流动）
-  T=60s  Layer 60 结束 → Final Norm
-  T=63s  LM Head 膨胀 → 概率分布"生长"
-  T=68s  采样粒子飞出 → 输出 token 显示
-  T=72s  自回归回路动画（粒子回流）
-  T=75s  相机拉远 → 全景 → 结束
-
-交互控制:
-  - ⏸ 暂停：任何时刻可暂停，自由旋转/缩放探索
-  - ◀▶ 跳转：点击时间轴跳到任意步骤
-  - 🔄 速度：0.5x / 1x / 2x / 4x 播放速度
-  - 📍 步骤列表：侧边栏显示所有步骤，点击跳转
-```
-
-#### Tensor Shape 3D 实时标注
-
-```
-数据流中每个节点旁边悬浮 3D 标签:
-
-  ┌──────────────┐
-  │ (B, 7, 7168) │ ← <Html> overlay，半透明背景
-  │ 50,176 params│    跟随 3D 块移动
-  └──────────────┘
-
-张量形状变化时的 3D 变形动画:
-  - 维度增加: 块"膨胀"（scale.x/y/z 按比例增长）
-  - 维度减少: 块"收缩"
-  - 维度分裂（如 Q 分 64 头）: 块"分裂"为多个小块
-  - 维度合并（如 MoE 汇合）: 多个小块"融合"为一个
-
-颜色映射值范围:
-  - 高维度 → 更鲜艳 + 更大发光强度
-  - 低维度（如压缩后的 576）→ 暗色 + 黄色标注 "压缩"
-```
-
-### 6.6 现代感视觉设计规范
-
-#### 设计语言：「深空科技」
-
-整体视觉风格追求**高端科技感 + 数据可视化美学**，参考 Apple Vision Pro UI、Bloomberg Terminal 现代化重设计、Stripe 产品页面的品质标准。
-
-#### 色彩系统
-
-```
-═══ 背景层 ═══
-主背景:      #06060f (近黑深蓝) — 不是纯黑，带微蓝色调
-次背景:      #0d0d1a (深空蓝) — 卡片/面板背景
-表面色:      #141428 (暗靛蓝) — 悬浮元素背景
-边框:        rgba(255,255,255,0.06) — 极微弱白色边框
-
-═══ 主色调 ═══
-品牌蓝:      #3b82f6 → #60a5fa (渐变) — 主要交互色
-辉光蓝:      #818cf8 — Bloom 效果主色
-
-═══ 功能色彩（3D 场景内） ═══
-Attention:   #4a9eff → #2563eb (蓝色系)
-MLP/FFN:     #34d399 → #10b981 (翠绿系)
-MoE Router:  #f59e0b → #f97316 (橙金系)
-Norm:        #fbbf24 → #eab308 (明黄系)
-Embedding:   #a78bfa → #8b5cf6 (紫色系)
-Vision/Conv: #22d3ee → #06b6d4 (青色系)
-输出/Logits: #f472b6 → #ec4899 (粉色系)
-
-═══ 状态色 ═══
-活跃/激活:   当前模块色 + emissive 0.4 + Bloom
-非活跃:      模块色 × 0.15 opacity
-Hover:       模块色 + emissive 0.2 + 白色边框 glow
-数据流粒子:  当前阶段色 + additive blending
-
-═══ 渐变 ═══
-全局渐变:    从 #06060f (顶) 到 #0a0a2e (底) — 微妙深度感
-卡片渐变:    从 rgba(255,255,255,0.03) 到 rgba(255,255,255,0.01)
-```
-
-#### 材质与光影
-
-```
-═══ 3D 材质 ═══
-
-默认材质 (Mac 集成 GPU — v1.0 默认):
-层块材质: MeshStandardMaterial {
-  metalness: 0.15       // 轻微金属感
-  roughness: 0.25       // 较光滑
-  envMapIntensity: 0.5
+if (!document.createElement('canvas').getContext('webgl2')) {
+  → 渲染 ASCII 结构树 + Markdown 参数表（零 JS 依赖）
+  → 顶部条幅："您的浏览器不支持 WebGL2。请升级至 Chrome/Edge 最新版"
+  → 仍可正常调用 PATCH /config 编辑与查看 Provenance Summary
 }
-// 注: 去 transmission/clearcoat，性能提升 2-3x
-
-高端材质 (独立 GPU — 自动检测升级):
-层块材质: MeshPhysicalMaterial {
-  metalness: 0.15
-  roughness: 0.25
-  transmission: 0.15    // 微透明（看到内部粒子流动）
-  thickness: 0.8
-  clearcoat: 0.3        // 清漆层增加光泽
-  clearcoatRoughness: 0.2
-  envMapIntensity: 0.5
-}
-
-活跃层块: 上述 + {
-  emissive: 模块颜色
-  emissiveIntensity: 0.3
-}
-
-粒子材质: PointsMaterial + 自定义 shader {
-  blending: AdditiveBlending
-  transparent: true
-  vertexColors: true
-  size: 根据距离衰减
-  // 片段着色器: 径向渐变圆点 + 发光尾迹
-}
-
-═══ 光照 ═══
-环境光:     HemisphereLight(#1a1a3e, #000000, 0.3)
-主方向光:   DirectionalLight(#ffffff, 0.8) position=[10, 15, 10]
-补光:       DirectionalLight(#3b82f6, 0.2) position=[-5, 5, -5]  // 蓝色补光
-点光源:     PointLight(#818cf8, 0.5) — 跟随活跃模块移动
-
-═══ 后处理 ═══
-
-默认 (Mac 集成 GPU — v1.0 默认):
-Bloom: {
-  threshold: 0.8
-  intensity: 1.5
-  radius: 0.4
-}
-// 仅 Bloom，去 Vignette/ChromaticAberration/Noise
-
-高端 (独立 GPU — 自动检测升级):
-Bloom: { threshold: 0.7, intensity: 2.0, radius: 0.5, luminanceSmoothing: 0.1 }
-Vignette: { darkness: 0.4, offset: 0.3 }
-ChromaticAberration: { offset: [0.0003, 0.0003] }
-Noise: { opacity: 0.015 }
 ```
 
-#### UI 组件现代感规范
+**已删除**：
+- ~~Level 0/1/2/3 多档 LOD 降级~~（原则 5：前期不做性能优化）
+- ~~GPU 性能检测自动降级~~
+- ~~低端机"简化 3D"模式~~
+- ~~Mac 集成 GPU 默认/高端 GPU 自动升级双档材质~~ → v1.0 统一 `MeshStandardMaterial(roughness=0.3, metalness=0.6)`。
 
-```
-═══ 信息面板 (glassmorphism 毛玻璃风格) ═══
-background: rgba(13, 13, 26, 0.75)
-backdrop-filter: blur(20px) saturate(150%)
-border: 1px solid rgba(255, 255, 255, 0.06)
-border-radius: 16px
-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4)
-padding: 24px
+---
 
-═══ 搜索框 ═══
-background: rgba(20, 20, 40, 0.8)
-border: 1px solid rgba(99, 102, 241, 0.2)
-border-radius: 12px
-transition: border-color 0.3s, box-shadow 0.3s
-&:focus {
-  border-color: rgba(99, 102, 241, 0.5)
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.15)
-}
+## 5.11 v1.1+ TODO（本文件范围内）
 
-═══ 徽章 (MoE / MLA / 量化等标签) ═══
-background: linear-gradient(135deg, rgba(color, 0.15), rgba(color, 0.05))
-border: 1px solid rgba(color, 0.3)
-border-radius: 8px
-font-size: 12px
-font-weight: 500
-letter-spacing: 0.05em
-text-transform: uppercase
+> 以下章节在本次修订中**已删除**，待相应版本回填。
 
-═══ 按钮 ═══
-background: linear-gradient(135deg, #3b82f6, #6366f1)
-border: none
-border-radius: 10px
-box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3)
-transition: transform 0.2s, box-shadow 0.2s
-&:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4) }
-
-═══ 数据表格 ═══
-font-family: "JetBrains Mono", "SF Mono", monospace  // 数值用等宽字体
-th { color: rgba(255,255,255,0.5); font-weight: 400; text-transform: uppercase; font-size: 11px }
-td { color: rgba(255,255,255,0.9); font-variant-numeric: tabular-nums }
-tr:hover { background: rgba(255,255,255,0.03) }
-
-═══ 字体 ═══
-标题: "Inter", sans-serif — font-weight: 600
-正文: "Inter", sans-serif — font-weight: 400
-数值/代码: "JetBrains Mono", monospace — font-weight: 400
-3D 标签: troika-three-text (SDF 渲染) — "Inter" 字体
-```
-
-#### 动画与过渡
-
-```
-═══ 全局过渡曲线 ═══
-默认 ease:    cubic-bezier(0.4, 0, 0.2, 1)    // Material Design standard
-弹性 ease:    cubic-bezier(0.34, 1.56, 0.64, 1)  // 轻微弹跳
-减速 ease:    cubic-bezier(0, 0, 0.2, 1)      // 进入动画
-
-═══ 页面加载序列 ═══
-1. 场景背景渐入 (0 → 0.3s)
-2. 3D 模型骨架线框渐入 (0.2s → 0.8s)
-3. 块体材质"充能"效果: 线框 → 半透明 → 实体 (0.5s → 1.5s)
-4. 连线"生长"动画 (1.0s → 1.8s)
-5. 标签和面板滑入 (1.5s → 2.0s)
-6. Bloom 后处理渐入 (1.8s → 2.2s)
-
-═══ 层块展开动画 ═══
-持续时间: 600ms
-编排:
-  0ms:    父块开始收缩
-  100ms:  子块从父块中心"爆出"
-  200ms:  子块移向目标位置（弹簧物理）
-  300ms:  连线"生长"连接子块
-  400ms:  标签渐入
-  600ms:  稳定
-
-═══ 微交互 ═══
-Hover 光晕:     200ms ease-out, emissive 从 0 → 0.2
-点击涟漪:       300ms, 从点击点向外扩散的半透明环
-进度条发光:     持续脉动, opacity 0.6 → 1.0 → 0.6
-粒子尾迹:       每个粒子后面 3-5 个渐隐副本
-```
+- [ ] **TODO v1.1**：2D SVG 模式（dagre 布局、SVG 6 层、节点/边/数据流动画、SVG 导出、分屏对比、弹出层窗口、边叠加层） —— 整节移出。
+- [ ] **TODO v1.1**：L3 NumericalHeatmap 动画层（Attention 权重热力、激活值分布 2D 面板）。
+- [ ] **TODO v1.1**：Stage-2 细粒度动画（脉动 / 膨胀 / 螺旋 / RoPE 旋转 / token residual 细粒度）。
+- [ ] **TODO v1.1**：反向传播动画（`DataFlowDirection.backward` + forward/backward split-screen）。
+- [ ] **TODO v1.2**：L4 ParallelismAnimation（TP / PP / DP / EP / CP / SP + 通信原语 AllReduce / AllGather / ReduceScatter / All2All / P2P）。
+- [ ] **TODO v1.2**：2D↔3D 切换过渡动画。
+- [ ] **TODO v1.2**：模型对比分屏（两个真实 HF 模型并排）。
 
 ---
 
