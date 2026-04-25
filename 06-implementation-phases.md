@@ -48,7 +48,11 @@
 - [ ] **P0-10** 交互预算观测 + 告警：
   - 记录 `PATCH /config` 后端处理延迟、端到端延迟、点选响应、scrub 帧时（仅记录，不作门槛）
   - **告警阈值**：若 Qwen2-0.5B 的 `PATCH /config` 后端延迟 ≥ 150ms 或端到端 ≥ 250ms（即接近 Phase 1 硬约束的 75%），必须在 Phase 0 验收报告中单列**风险项**，并附带初步瓶颈定位（detect/synthesize/estimate/layout 哪一阶段占大头）与优化建议
-  - **DeepSeek-V3 级延迟估算**：Phase 0 收官前，基于 Qwen2-0.5B 实测 + 四阶段复杂度外推，给出 DeepSeek-V3（671B, 256 experts）的 `PATCH` 预期延迟；若外推值 > 200ms，Phase 1 启动前需讨论：调整预算值 / 增加异步预计算 / 降级为「仅后端 <200ms」放宽端到端
+  - **DeepSeek-V3 级延迟估算**：Phase 0 收官前，基于 Qwen2-0.5B 实测 + 四阶段（detect / synthesize / estimate / layout）复杂度外推，给出 DeepSeek-V3（671B, 256 experts）的 `PATCH` 预期延迟；若外推值 > 200ms，**Phase 1 启动前必须按下列 3 候选方案择一决议**（对齐原则 5 "交互硬约束"）：
+    1. **异步预计算**（estimate/layout 后台跑，PATCH 仅返回拓扑+Provenance=ESTIMATED，WS 二次推 revision 补 estimate）— 适用场景：瓶颈在 S4/S5；判据：backend 延迟可压到 < 120ms 且 UI 骨架可独立渲染
+    2. **放宽端到端 → 仅后端 <200ms**（网络/渲染不纳入硬约束）— 适用场景：瓶颈在前端 revision 整体替换；判据：E2E 超 300ms 但 backend < 200ms，且 UX 评审接受加载占位
+    3. **差异化字段粒度触发**（仅 dtype/batch/seq_len 等轻量字段走热路径；num_layers/num_experts 等结构字段降级为重新点击"应用"按钮触发）— 适用场景：瓶颈在 S3 综合 + S5 布局，无法异步；判据：白名单字段切换后 PATCH < 200ms，结构字段 UX 接受确认式交互
+    - **决议产物**：Phase 0 验收报告必须列出：外推值、瓶颈阶段、所选方案编号、放弃其他方案的理由；任何方案都**不得**删除 `PATCH` 端点本身或取消 revision 机制
 - [ ] **P0-11** Docker 镜像 build（多阶段：Python backend + Next.js frontend），本地 `docker run` 通过，浏览器访问可看到 Qwen2-0.5B 3D 渲染
   - **必须记录实际镜像大小**并回填 README / 03-system-architecture.md 的「预计 1.3–2.0GB」占位
   - **告警阈值**：若实际镜像 > 2.5GB，Phase 0 验收报告必须讨论镜像拆分策略（web/api 分离 / slim torch wheel / 移除 tokenizers 多语言资源）

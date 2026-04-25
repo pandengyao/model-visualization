@@ -10,13 +10,13 @@
 
 ## 目录
 
-- [6.1 3D 场景总览与空间隐喻](#61-3d-场景总览与空间隐喻)
-- [6.2 AnimationLayer 四层叠加模型](#62-animationlayer-四层叠加模型)
-- [6.3 v1.0 Stage-2 数据流动画（三项最终范围）](#63-v10-stage-2-数据流动画三项最终范围)
+- [5.1 3D 场景总览与空间隐喻](#51-3d-场景总览与空间隐喻)
+- [5.2 AnimationLayer 四层叠加模型](#52-animationlayer-四层叠加模型)
+- [5.3 v1.0 Stage-2 数据流动画（三项最终范围）](#53-v10-stage-2-数据流动画三项最终范围)
   - [① Attention Q/K/V 分解动画](#-attention-qkv-分解动画)
   - [② MoE 路由动画](#-moe-路由动画)
   - [③ Residual flow 动画](#-residual-flow-动画)
-- [6.4 视觉规范（精美硬约束，对齐原则 2）](#64-视觉规范精美硬约束对齐原则-2)
+- [5.4 视觉规范（精美硬约束，对齐原则 2）](#54-视觉规范精美硬约束对齐原则-2)
   - [配色系统（深色优先 + 玫瑰金强调）](#配色系统深色优先--玫瑰金强调)
   - [材质](#材质)
   - [光照](#光照)
@@ -25,13 +25,13 @@
   - [排版](#排版)
   - [相机](#相机)
   - [动效缓动](#动效缓动)
-- [6.5 Template A/B/C/G 视觉设计（对齐原则 8）](#65-template-abcg-视觉设计对齐原则-8)
-- [6.6 Provenance 徽标规范（对齐原则 9）](#66-provenance-徽标规范对齐原则-9)
-- [6.7 Config 编辑器 UI 规范（对齐原则 6 PATCH /config）](#67-config-编辑器-ui-规范对齐原则-6-patch-config)
-- [6.8 GPU 选择器 UI 规范（对齐原则 6 GPU Catalog）](#68-gpu-选择器-ui-规范对齐原则-6-gpu-catalog)
-- [6.9 交互设计](#69-交互设计)
-- [6.10 WebGL 不可用 Fallback](#610-webgl-不可用-fallback)
-- [6.11 v1.1+ TODO（本文件范围内）](#611-v11-todo本文件范围内)
+- [5.5 Template A/B/C/G 视觉设计（对齐原则 8）](#55-template-abcg-视觉设计对齐原则-8)
+- [5.6 Provenance 徽标规范（对齐原则 9）](#56-provenance-徽标规范对齐原则-9)
+- [5.7 Config 编辑器 UI 规范（对齐原则 6 PATCH /config）](#57-config-编辑器-ui-规范对齐原则-6-patch-config)
+- [5.8 GPU 选择器 UI 规范（对齐原则 6 GPU Catalog）](#58-gpu-选择器-ui-规范对齐原则-6-gpu-catalog)
+- [5.9 交互设计](#59-交互设计)
+- [5.10 WebGL 不可用 Fallback](#510-webgl-不可用-fallback)
+- [5.11 v1.1+ TODO（本文件范围内）](#511-v11-todo本文件范围内)
 
 ---
 
@@ -433,6 +433,10 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 3. 每个字段旁显示 **"原值 → 当前值"**；当前值与原值不同时以玫瑰金强调色高亮。
 4. **Reset 按钮**恢复到原 config（触发一次 PATCH，overrides=空）。
 5. 白名单字段严格对齐 [11-extension-points.md §8.1](11-extension-points.md)。
+6. **并发竞态防护**（对齐 04 §4.7.1 revision 单调）：
+   - 前端维护 `lastAppliedRevision`；收到 WS `graph_update` 时若 `msg.revision <= lastAppliedRevision` → **丢弃**（防 debounce 连发 PATCH 后乱序到达）
+   - 每次 PATCH 前本地递增 `pendingRequestId`；WS 消息无 requestId 时只靠 revision 单调排序；PATCH 的 HTTP 响应若携带 `accepted_revision < lastAppliedRevision` → 忽略该次响应的 UI 副作用（保留服务端状态）
+   - 快速连改多个字段在 300ms 内最终合并为**一次** PATCH（debounce 天然合并）；若用户在 PATCH pending 期间继续修改 → 不取消已发起的，等 WS 回推后再发下一次（顺序保证 + 最终一致）
 
 ---
 

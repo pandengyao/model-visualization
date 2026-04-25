@@ -242,6 +242,17 @@ class MemoryEstimator(Protocol):
 NVIDIA：A100-40G/80G、H100-80G、H200-141G、B200、4090-24G、3090-24G、L40S-48G
 国产：昇腾 910B、寒武纪 MLU370、昆仑芯 P800/R200
 
+### 6.3.1 null 字段语义（国产卡公开规格不完整的处理，对齐原则 9）
+
+| 字段 | 允许 null | MemoryEstimator 行为 |
+|---|---|---|
+| `memory_gb` | ❌ 必填 | 缺失 → 条目加载失败，启动阶段 fail-fast |
+| `memory_bandwidth_gbps` | ✅ | 估算仍进行；**provenance.caveats** 追加 `"memory_bandwidth_gbps=null，带宽相关预估不可用"` |
+| `fp16_tflops` / `bf16_tflops` / `fp8_tflops` | ✅ | 若当前 dtype 对应字段 null → FLOPs/延迟估算跳过并在 caveats 说明；**不得**用其他 dtype 字段代偿 |
+| `nvlink_gbps` / `tdp_w` / `release_year` | ✅ | 仅影响展示型 tooltip，不影响计算；UI 显示 "—" |
+
+**原则**：任何 null 都**必须**在该估算结果的 provenance.caveats 中明确指出哪一字段缺失，严禁静默使用默认值/兜底常量（违反原则 9）。
+
 ### 6.4 扩展方式
 新增 GPU = 在 yaml 追加一条记录，**无需改代码**。前端下拉菜单自动从 `/api/v1/gpus` 拉取。
 

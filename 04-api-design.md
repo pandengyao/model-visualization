@@ -267,6 +267,22 @@ data: { "type":"about:blank","title":"Meta load timeout","status":504,"code":"ME
 
 > **为何首屏必须含 layout**：若前端自行临时布局，不同渲染环境（浏览器/分辨率/DPR）会产生不一致结果，违反原则 3。layout 由后端 LayoutEngine 统一计算是契约。
 
+#### 4.5.2 revision=1 期间 UI 交互契约（GPU Selector / PATCH）
+
+> 对齐原则 5「交互硬约束」+ 原则 3「结构正确」。revision=1 时 `estimate` 可为 null，但 UI 已渲染 GPU Selector / ConfigEditor，必须定义此窗口期的交互行为。
+
+| UI 元件 | revision=1（estimate=null） | revision=2 到达后 |
+|---|---|---|
+| `<GPUSelector>` | **可见但禁用**（`disabled` 置灰 + tooltip "显存估算加载中…"）；允许本地记录用户**意向选择**（存入 Zustand 临时槽位），不发送 PATCH | 启用；若有意向选择则自动应用并触发一次 PATCH |
+| `<ConfigEditor>` 字段 | **只读展示**当前 config（来自 revision=1 的 `profile.config_summary`）；禁止 PATCH 发起 | 启用，按 §4.6 正常流程 |
+| `<EstimatePanel>` | 显示骨架屏 + "计算中…" | 填充真实数值，带 provenance 徽标 |
+| 点选节点 / tooltip | **允许**（只读结构信息，不依赖 estimate） | 追加显存/FLOPs 面板 |
+
+**实现要点**：
+- 前端 `canInteract = revision >= 2` 作为 PATCH / GPU 选择的唯一开关
+- revision=1 到 revision=2 间隔通常 < 1s（对齐 06 P0-10 延迟预算）；超过 3s 仍停留 revision=1 时 UI 顶部升级提示为 "首屏已就绪，估算耗时较长"，并把意向 GPU 选择暂存到 localStorage 防刷新丢失
+- 后端 revision=2 到达后若检测到 `Last-User-Intent` 头（前端在 revision=1 期间的选择落盘）存在，则 snapshot 带上与该 GPU 对应的 estimate（避免多一轮往返）
+
 ### 4.6 PATCH /config —— 配置热更新（原则 5 硬约束 + 原则 6 动态编辑）
 
 ```
@@ -341,6 +357,21 @@ WS /api/v1/stream/{org}/{repo}/updates?session_id={uuid}
 ```
 
 **消息结构与 SSE `segment` 帧的 `data` 字段 1:1 对齐**（同一个 ModuleGraph / EstimateResult schema），前端 store 可复用 `replaceSnapshot()` 逻辑。
+
+#### 4.7.1 Session 生命周期（对齐原则 5 / 原则 8）
+
+| 事件 | 行为 |
+|---|---|
+| **建立** | 首次 SSE（§4.5）返回 `session_id`（UUIDv4）；前端以此为 query 开启 WS |
+| **空闲超时** | 服务端无推送 **≥ 5 分钟** → 发送 ping；client 无回复再 10s 关闭（code=4408 "idle timeout"）|
+| **硬超时** | 单个 session 存活 **≥ 2 小时** → 服务端主动关闭（code=4410 "session expired"），前端需重新 GET /stream 拿新 session_id |
+| **页面离开** | `window.beforeunload` → 前端发 close（code=1001）；后端清理订阅键 |
+| **session_id 重复订阅** | 同一 session_id 再次 WS 连接 → 服务端**拒绝第二个**（code=4409 "duplicate session"），防止双连消费同一 revision 序列 |
+| **重连策略** | WS 断开后前端指数退避重连（200ms → 400ms → 800ms → 最多 5 次）；携带 `?last_revision=N` query；服务端若仍保有该 session 的 ring buffer（最后 32 帧）则补发缺失 revision，否则返回 close code=4426 "session not found"，前端必须重新 GET /stream |
+| **revision 单调** | 同一 session 内 `revision` 严格单调递增；前端收到 revision ≤ 本地最大值的消息 → 丢弃（防乱序） |
+| **Last-User-Intent 头** | §4.5.2 提到的意向选择通过 WS 第一帧 `client_hello` 上报：`{"type":"client_hello","last_intent":{"gpu_id":"..."}}`；服务端据此在下一次 revision 中附带对应 estimate |
+
+**资源上限（v1.0）**：单实例 ≤ 100 并发 session；超出返回 503。session 状态仅存内存（不引入 Redis，对齐原则 1）。
 
 ### 4.8 交互响应预算（硬约束，Phase 1 起必达）
 

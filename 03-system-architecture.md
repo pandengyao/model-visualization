@@ -171,10 +171,11 @@ Router 复用原始 config + overrides（合并后为 effective_config）
 └─ Stage 3: python:3.12-slim (终镜像)
      ├── /app/backend              （FastAPI + uvicorn）
      ├── /app/frontend/.next/standalone  + /static + /public
-     └── entrypoint.sh：启动 uvicorn :8000 + node server.js :3000
+     └── entrypoint.sh：`tini -g -- bash -c "uvicorn :8000 & node server.js :3000 & wait -n; kill -TERM 0"`
 ```
 
 - Next.js 采用 **`output: 'standalone'`** 模式，最终镜像只需很薄的 Node 运行时即可承载静态产物与少量 SSR。
+- **进程守护策略（v1.0 轻量方案，对齐原则 1 非商业化）**：用 `tini` 作 PID 1 收割僵尸；`wait -n` 任一子进程退出即整体退出（依赖 Docker/K8s 重启策略恢复），不引入 supervisord/s6 等重量级 supervisor。v1.1+ 若出现子进程静默挂起（非 exit）的场景再评估升级。
 - 镜像大小按当前依赖估算 ~1.3–2.0 GB（torch CPU + transformers 占主要体积，以实际构建为准）。
 
 ---

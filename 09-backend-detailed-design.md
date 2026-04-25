@@ -56,10 +56,10 @@
 | 16 | Pydantic 响应模型（11+ Schema 类） | P0 | 不支持 | 前后端契约 | `[新增] models/schemas.py` |
 | 17 | 安全规则（model_id 校验 + trust_remote_code 警告） | P1 | 不支持 | `validate_model_id()` + `trust_remote_code=False` 默认隔离；**v1.0 不启用 rate limit**（对齐原则 1 与 04 §4.12，不引入 slowapi） | `[新增] main.py` |
 
-| 18 | GPU 显存估算（推理 + 训练双模式，支持 Megatron 和 FSDP 两种并行框架） | P0 | 不支持 | 含 Megatron（TP/PP/DP/CP/EP）和 FSDP（Full/Grad/No Shard）两种框架，推理含 KV Cache 和量化感知 | `[新增] services/memory_estimator.py` |
-| 19 | 并行策略计算引擎（Device Mesh / TP 切分 / PP 调度 / DP 梯度同步 / 通信量估算） | P1 | 不支持 | 覆盖 Megatron-style 全并行维度 | `[新增] services/parallel_engine.py` |
-| 20 | 训练数据流生成（宏观 pipeline 调度 + 并行通信 + 梯度累积） | P1 | 不支持 | PP 1F1B 时序、DP 梯度同步、梯度累积 | `[新增] services/training_flow_generator.py` |
-| 21 | 层内前向/反向数据流生成（单层内部的计算步骤和梯度回传路径） | P1 | 不支持 | 覆盖所有模型类别的层内 forward/backward 细节 | `[新增] services/flow_generator/backward.py` |
+| 18 | GPU 显存估算（v1.0 **仅推理版**：weights + KV cache + activations；训练版 Megatron/FSDP 已迁至 v1.1+ parking） | v1.0 (P0) | 不支持 | v1.0 不含 gradients/optimizer_states/comm_buffer；不含 Megatron/FSDP 分支（对齐文档头部冻结范围 + 11/04） | `[新增] services/memory_estimator.py` |
+| 19 | ~~并行策略计算引擎（Device Mesh / TP / PP / DP / 通信量估算）~~ → **v1.1+**（parking；v1.0 仅接口空实现，见 §5.1.15 / §5.2.11） | v1.1+ | 不支持 | — | — |
+| 20 | ~~训练数据流生成（PP 1F1B / DP 同步 / 梯度累积）~~ → **v1.1+**（parking） | v1.1+ | 不支持 | — | — |
+| 21 | ~~层内前向/反向数据流（gradient_flow / activation_checkpoint）~~ → **v1.1+**（parking；`direction="backward"` 接口就位，实现留空） | v1.1+ | 不支持 | — | — |
 | 22 | ~~transformers 模型结构源码解析（AST 解析）~~ | — | — | **v1.1+**：已迁至 parking 文件。v1.0 以 meta-device + safetensors 为 ground truth | — |
 
 ### 架构设计约束：面向变化的能力

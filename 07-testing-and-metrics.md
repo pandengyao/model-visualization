@@ -16,6 +16,15 @@
 
 > 对齐原则 7（真实模型优先）与原则 8（架构广度底线）。每个模型都必须以 meta-device 实际加载后跑通完整 pipeline（parse → detect → synthesize → estimate → layout），并比对 HF 官方 config 字段。
 
+#### Gated 模型凭证与离线 fixture 策略
+
+部分模型（`meta-llama/Llama-3-8B` / `meta-llama/Llama-3-70B` / `deepseek-ai/DeepSeek-V3` / 部分 Mistral/Gemma 版本）在 HF Hub 需要授权访问。CI 执行策略：
+
+1. **CI 凭证**：`HF_TOKEN` 作为 GitHub Actions secret 注入 `env.HF_TOKEN`；读权限 token（只读 gated repo）由项目维护者单独申请并按季度轮换
+2. **离线 fixture 回落**（对齐原则 1 非商业化 + 原则 7 真实模型）：每个 gated 模型在 `tests/fixtures/gated/<org>_<repo>/` 提交其 `config.json` + `model.safetensors.index.json`（仅 metadata 头，无权重），大小 < 10KB/模型；测试默认读 fixture，`HF_TOKEN` 存在时切换为真实 Hub 拉取并比对 fixture 是否过期（CI warn，季度同步）
+3. **无 token 的 PR 环境**（外部贡献者）：自动走 fixture 路径，跳过真实网络拉取；CI 标记 `[offline]` 但仍必须通过 fixture 校验
+4. **禁止**：在 repo 内提交真实权重文件；在测试代码中明文硬编码任何 token
+
 ### Decoder-only（v1.0 必测）
 
 | 模型 | 预期 Template | 预期参数数 | 预期 Provenance `layers_used` 信号源 | 预期 `is_final=true` 延迟（观测） |
