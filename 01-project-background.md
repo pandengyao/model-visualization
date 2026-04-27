@@ -33,7 +33,7 @@
 
 > **完整分析**: [appendix-a-benchmark-analysis.md](appendix-a-benchmark-analysis.md)
 >
-> 基于对 Netron、Google Model Explorer、Transformer Explainer、LLM Viz 的**源码级**分析，提炼出 36 项可借鉴特性（10 项 TIER-1 必须实现 + 10 项 TIER-2 高价值 + 6 项 TIER-3 锦上添花）。
+> 基于对 Netron、Google Model Explorer、Transformer Explainer、LLM Viz 的**源码级**分析，提炼出 26 项可借鉴特性（10 项 TIER-1 必须实现 + 10 项 TIER-2 高价值 + 6 项 TIER-3 锦上添花）。
 
 本产品不与这些工具做"商业竞争"，而是在以下**技术维度**全面超越它们，以满足我们自己的使用需求：
 
@@ -51,16 +51,18 @@
 | 来源 | License | 核心借鉴 |
 |---|---|---|
 | **Netron** (MIT) | SVG + Dagre | Web Worker 布局 + 操作元数据系统 + 双路径边命中检测 |
-| **Model Explorer** (Apache-2.0) | WebGL + Three.js | GPU 实例化渲染 + 层级展开/折叠 + 分屏同步对比 + LOD |
+| **Model Explorer** (Apache-2.0) | WebGL + Three.js | GPU 实例化渲染 + 层级展开/折叠 + 分屏同步对比 + LOD（Phase N） |
 | **Transformer Explainer** (MIT) | Svelte + D3 | GSAP 分段动画 + Sankey 数据流 + 注意力矩阵可视化 |
 | **LLM Viz** (无 License, 仅思路参考) | 自研 WebGL | **3D 空间隐喻**(Y=推理, X=分支, Z=并行) + 弹簧物理相机 + Guided Tour + 按需渲染 |
 
 ### 1.2 目标能力
 
-输入 HuggingFace 模型路径（如 `moonshotai/Kimi-K2.6`），产出以下 7 项能力。**v1.0 交付其中 4 项**（✅ 标记），其余 3 项推迟至 v1.1+（🕐 标记）：
+> v1.0 冻结范围的权威定义见 [06-implementation-phases.md](06-implementation-phases.md) §v1.0 冻结块与 [README §原则 10](README.md)。本表仅为快速参考。
+
+输入 HuggingFace 模型路径（如 `deepseek-ai/DeepSeek-V3`），产出以下 7 项能力。**v1.0 交付其中 4 项**（✅ 标记），其余 3 项推迟至 v1.1+（🕐 标记）：
 
 1. ✅ **v1.0** — **3D 交互式架构可视化**：可旋转、缩放、点击展开的 3D 模型架构（默认且唯一模式）
-2. 🕐 **v1.1+** — **2D 结构图可视化**：经典 DAG 布局 + SVG 渲染，适合论文导出（v1.0 已删除，见 README 冻结决议）
+2. 🕐 **v1.1+** — **2D 结构图可视化**：经典 DAG 布局 + SVG 渲染，适合论文导出（v1.0 不交付，见 [06 §v1.0 范围冻结](06-implementation-phases.md)）
 3. 🕐 **v1.1+** — **2D/3D 一键切换**：工具栏切换按钮（依赖 #2，同步推迟）
 4. ✅ **v1.0** — **端到端推理数据流**：发光粒子沿推理路径流动，展示 tensor shape 变化（Stage-2 范围：Attention Q/K/V + MoE 路由 + Residual flow 三项，见 05 §5.3）
 5. ✅ **v1.0** — **MoE/MLA/量化专项可视化**：专家路由网格、MLA 压缩漏斗、量化徽标
@@ -72,6 +74,8 @@
 ### 1.3 已有资产
 
 `hf-model-explorer` skill（`/Users/frank/work/.claude/skills/hf-model-explorer/scripts/`）提供了可复用的后端核心逻辑：
+
+> **原则 9 / 原则 11 约束**：`build_synthetic_tree()` 和 `estimate_params_from_config()` 的输出为 config-derived 合成数据，**一律打 INFERRED**（非 EXACT）。仅 meta-device ground truth 路径（L2）的输出可标 EXACT。
 
 | 函数 | 文件 | 功能 |
 |---|---|---|
@@ -104,15 +108,15 @@
 
 | 旅程 | 占比 | 场景 | 关键页面 | 完成标准 |
 |---|---|---|---|---|
-| **Quick Check** | ~40% | "Kimi-K2.6 是 MoE 还是 Dense？多少参数？" | 首页 → 搜索 → 信息面板 | <5s 看到参数表 + 架构徽章 |
+| **Quick Check** | ~40% | "DeepSeek-V3 是 MoE 还是 Dense？多少参数？" | 首页 → 搜索 → 信息面板 | <5s 看到参数表 + 架构徽章 |
 | **Deep Dive** | ~45% | "MLA 注意力的 KV 压缩比是多少？数据怎么流的？" | 模型页 → 展开层 → 数据流动画 → Guided Tour | 完成 Tour 或自由探索 >2min |
-| **Compare** | ~15% | "Qwen3-30B 和 Kimi-K2.6 的 MoE 结构有什么区别？" | 对比页 → 并排查看 → 差异高亮 | 识别出关键配置差异 |
+| **Compare** | ~15% (v1.1+) | "Qwen3-30B 和 DeepSeek-V3 的 MoE 结构有什么区别？" | 对比页 → 并排查看 → 差异高亮 | 识别出关键配置差异 |
 
-> **旅程比例说明**：数据流动画、并行策略可视化、前向/反向传播动画、显存估算等高级功能是本产品相对其他工具的核心差异化，Deep Dive 是我们团队的核心使用路径，不是边缘场景。
+> **旅程比例说明**：Deep Dive 是我们团队的核心使用路径，不是边缘场景。v1.0 Deep Dive 核心路径聚焦于：Attention Q/K/V + MoE 路由 + Residual flow 三项 Stage-2 动画 + MLA 压缩 + 量化徽标 + 推理版 MemoryEstimator。并行策略可视化（v1.2+ 规划，v1.0 不交付）、前向/反向传播动画（v1.1+ 规划，v1.0 不交付）、显存估算等高级功能是本产品相对其他工具的核心差异化。
 
 #### 设计优先级原则
 
-1. **信息密度优先于动画炫酷** — 我们要快速获取准确信息，动画是锦上添花
+1. **信息密度优先于动画炫酷** — 信息密度优先于纯装饰性动效，动画必须服务于教学理解
 2. **首屏即答** — Quick Check 需求必须在首屏（无需滚动/展开）满足
 3. **渐进式复杂度** — 默认显示简洁概要，点击/展开才揭示深层细节
 4. **数据流动画是核心功能** — 不可裁剪，是我们日常使用中最有价值的差异化能力

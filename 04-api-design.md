@@ -12,24 +12,22 @@
 | 方法 | 路径 | 说明 | 权威定义 |
 |---|---|---|---|
 | GET | `/api/v1/stream/{org}/{repo}` | **主端点**：SSE 流式推送 Phase A/B 快照（revision=1/2），见 §4.5 | 09 §5.1.8 |
-| PATCH | `/api/v1/stream/{org}/{repo}/config` | **配置热更新**：原则 5 交互硬约束 + 原则 6 动态编辑，见 §4.6 | 11 §8 |
+| PATCH | `/api/v1/stream/{org}/{repo}/config` | **配置热更新**：原则 7 交互硬约束 + 原则 8 动态编辑，见 §4.6 | 11 §8 |
 | WS | `/api/v1/stream/{org}/{repo}/updates` | **热更新推送**：PATCH 后推送新 ModuleGraph snapshot，见 §4.7 | 11 §8 |
 | GET | `/api/v1/model/{org}/{repo}` | 一次性 JSON 快照（内部订阅 SSE 并聚合到最终 revision） | 09 §5.2.1 |
-| POST | `/api/v1/compare` | 两模型对比 | 09 §5.2.1 |
 | GET | `/api/v1/popular` | 预缓存热门模型列表 | 09 §5.2.1 |
 | GET | `/api/v1/gpus` | 返回 `gpu-catalog.yaml` 内容（前端 GPU 选择器数据源） | 11 §6 |
 | GET | `/api/v1/architectures` | 已注册 ArchitectureAdapter 列表（扩展点内省） | 11 §1 |
 | GET | `/api/v1/memory-estimators` | 已注册 MemoryEstimator 列表（v1.0：推理版 1 条） | 11 §5 |
-| GET | `/api/v1/parallelism-strategies` | 已注册 ParallelismStrategy 列表（v1.0：空数组） | 11 §4 |
-| GET | `/health/{live,ready,startup}` | K8s 健康检查三件套 | 09 §5.2.1 |
+| GET | `/health/{live,ready,startup}` | 容器 liveness/readiness/startup 检查（非 K8s 专用） | 09 §5.2.1 |
 
-> v1.0 不提供分片端点 `/config`、`/tree`、`/params`——所有分段已通过 SSE `segment` 字段统一下发（见 §4.5）。分片端点可在 v1.1 视需要重新引入。
+> v1.0 不提供分片端点 `/config`、`/tree`、`/params`——SSE 统一下发单段 `segment="full"`（见 §4.5）；多段 `segment` 仅为 v1.1+ 预留。分片端点可在 v1.1 视需要重新引入。
 
 ### 4.2 核心数据模型（与 09 §5.1.2 对齐；Provenance 为全局强制字段）
 
 前端 TypeScript 类型 1:1 对应后端 Pydantic 模型。**唯一权威来源**为 09 §5.1.2。此处仅给出前端必须了解的顶层结构。
 
-#### 4.2.1 Provenance（原则 9 强制字段）
+#### 4.2.1 Provenance（原则 11 强制字段）
 
 ```python
 class Confidence(str, Enum):
@@ -38,7 +36,7 @@ class Confidence(str, Enum):
     ESTIMATED = "estimated"   # 计算估算（显存/FLOPS/延迟）
 
 class Provenance(BaseModel):
-    source: str               # "meta_device" | "safetensors_metadata" | "config_json" | "ast_parse" | "config_override"
+    source: str               # "meta_device" | "safetensors_metadata" | "config_json" | "config_override" | "memory_estimator" | "pipeline_aggregate"
     confidence: Confidence
     caveats: list[str] = []
 ```
@@ -47,11 +45,13 @@ class Provenance(BaseModel):
 
 #### 4.2.2 ModuleGraph（3D 渲染唯一数据源）
 
+> 唯一事实源：09 §5.1.2
+
 ```python
 class ModuleNode(BaseModel):
     id: str                                    # 唯一路径，如 "model.layers.0.self_attn"
     class_name: str                            # 如 "DeepseekV3Attention"
-    level: Literal["layer", "block", "op", "tensor"]  # v1.0 只填 "block"（原则 6 结构粒度预留）
+    level: Literal["block"]  # v1.0 固定 block 粒度
     params: int
     dtype: str                                 # "bfloat16" | "int8" | ...
     tensor_shapes: dict[str, list[int]]        # {"q_proj.weight": [7168, 7168], ...}
@@ -62,15 +62,12 @@ class DataEdge(BaseModel):
     source: str
     target: str
     edge_type: Literal[
-        "data_flow",              # 前向激活
+        "data_flow",
         "residual",
         "skip_connection",
         "branch_merge",
-        "gradient_flow",          # 反向梯度（v1.1 启用，v1.0 不产出）
-        "activation_checkpoint",  # 激活值缓存（v1.1）
-        "gradient_accumulation",  # 梯度累积（v1.1）
     ]
-    direction: Literal["forward", "backward", "bidirectional"]  # v1.0 仅 "forward"
+    direction: Literal["forward"]
     tensor_shape: list[int] | None
     provenance: Provenance                     # 强制
 
@@ -85,9 +82,9 @@ class ModuleGraph(BaseModel):
     provenance: Provenance                     # 根级 provenance，刻画整图的可信度
 ```
 
-> **扩展点锚**：`level` / `edge_type` / `direction` 的未来枚举值由 11 §7（DataFlowDirection）与 11 §1（ArchitectureAdapter）驱动演进，**不得**通过破坏性修改 04 引入，必须走 `revision` 向前兼容。
+> v1.1+ 的枚举扩展在对应版本契约文档中单独定义，不在 v1.0 本章预置。
 
-#### 4.2.3 ArchitectureProfile（驱动 2D/3D 布局与视觉编码）
+#### 4.2.3 ArchitectureProfile（驱动 3D 布局与视觉编码）
 
 ```python
 class ArchitectureProfile(BaseModel):
@@ -95,7 +92,7 @@ class ArchitectureProfile(BaseModel):
     features: list[str]                        # ["moe", "mla", "gqa", "sliding_window", "quantized", ...]
     config_summary: dict                       # 标准化后的关键 config（见 09 §5.1.9）
     parsing_layers_used: list[str]             # ["config_json", "safetensors_metadata", "meta_device"]
-    template_id: Literal["A", "B", "C", "G"]   # 原则 8：未识别 → "G" 通用回退（非静默回退 LLaMA）
+    template_id: Literal["A", "B", "C", "G"]   # 原则 10：未识别 → "G" 通用回退（非静默回退 LLaMA）
     provenance: Provenance
 ```
 
@@ -109,10 +106,6 @@ class MemoryBreakdown(BaseModel):
     weights_bytes: int
     kv_cache_bytes: int
     activations_bytes: int
-    # v1.1 预留（v1.0 均为 None / 0）
-    gradients_bytes: int | None = None
-    optimizer_states_bytes: int | None = None
-    comm_buffer_bytes: int | None = None
     # 汇总
     per_device_total_bytes: int
     gpu_capacity_bytes: int
@@ -123,12 +116,10 @@ class EstimateResult(BaseModel):
     memory: MemoryBreakdown
     flops: dict
     kv_cache: dict | None
-    communication: dict | None                 # 并行通信量（v2.0）
-    latency: dict | None
     provenance: Provenance                     # 强制
 ```
 
-**MemoryEstimator 请求语义**：`ModuleGraph + TrainingConfig + ParallelismPlan + GPUSpec(gpu_id)` → `MemoryBreakdown`。v1.0 的 `TrainingConfig.batch` 语义上为推理 batch，`ParallelismPlan` 可为 `tp=pp=dp=ep=1`（单卡推理）。结果并入主 SSE 响应的 `data.estimate` 部分（见 §4.5），不设独立端点。
+**MemoryEstimator 请求语义**：v1.0：ModuleGraph + InferenceConfig + GPUSpec → MemoryBreakdown（ParallelismPlan 传 None）；v1.1+：扩展为 EstimateConfig + ParallelismPlan。结果并入主 SSE 响应的 `data.estimate` 部分（见 §4.5），不设独立端点。
 
 #### 4.2.5 LayoutResult
 
@@ -137,6 +128,7 @@ class LayoutResult(BaseModel):
     positions: dict[str, dict]                 # node_id → {x, y, z, width, height, depth}
     camera: dict
     bounds: dict
+    provenance: Provenance                     # confidence = ESTIMATED
 ```
 
 **不再使用的旧模型**：`TreeNode`、`FlowStep`、`ParamStats`、`KeyConfig`、`MoEInfo/MLAInfo/QuantInfo`、`SubConfig` —— 已由 `ModuleGraph` + `ArchitectureProfile` + 节点 `metadata` + 边 `edge_type` 替代。迁移映射见 09 §5.1.2 / 09 §5.2 `from_stage_results()`。
@@ -177,10 +169,16 @@ class ProblemDetails(BaseModel):
 | `META_LOAD_TIMEOUT` | 504 | meta-device 加载超时 |
 | `HUB_UNAVAILABLE` | 503 | HF Hub 不可达且 L1 无缓存 |
 | `INTERNAL` | 500 | 其他未分类异常 |
+| `TRUST_REMOTE_CODE_BLOCKED` | 422 | `TRUST_REMOTE_CODE=false` 时模型含自定义代码 |
+| `SCHEMA_VALIDATION_FAILED` | 500 | 后端产出不符 Pydantic 契约 |
+| `SESSION_EXPIRED` | 410 | SSE/WS session 超时 |
+| `SNAPSHOT_NOT_READY` | 409 | revision=1 期间 PATCH 请求被拒 |
 
 > **原则 1（非商业化）落地**：**不**提供 `RATE_LIMITED` / `ADMISSION_REJECTED` / `CIRCUIT_OPEN` / 配额 / 计费 / 套餐相关错误码。内部工具无需防刷。
 
 ### 4.5 SSE 主流式协议（与 09 §5.1.8 对齐）
+
+> 本节为 SnapshotData 类型（SSE segment 帧 data 字段）的唯一事实源。
 
 **端点**：`GET /api/v1/stream/{org}/{repo}`，响应头 `Content-Type: text/event-stream`、`Cache-Control: no-cache, no-transform`、`X-Accel-Buffering: no`。
 
@@ -196,11 +194,12 @@ data: {
   "source": "config_json+safetensors_metadata",
   "data": {
     "graph": { "nodes": {...}, "edges": [...], "hierarchy": {...}, "provenance": {...} },
-    "profile": { "model_type": "deepseek_v3", "features": ["moe","mla","gqa"], "template_id": "B", ... },
+    "profile": { "model_type": "deepseek_v3", "features": ["moe","mla","gqa"], "template_id": "C", ... },
     "estimate": { "memory": {...}, "flops": {...}, "provenance": {...} },
     "layout": { "positions": {...}, "camera": {...} }
   },
   "provenance_summary": {
+    "source": "pipeline_aggregate",
     "layers_used": ["config_json", "safetensors_metadata"],
     "overall_confidence": "inferred",
     "caveats": ["meta-device 加载进行中"]
@@ -218,6 +217,7 @@ data: {
   "source": "meta_device",
   "data": { ...更精确的 graph 与 estimate... },
   "provenance_summary": {
+    "source": "pipeline_aggregate",
     "layers_used": ["config_json", "safetensors_metadata", "meta_device"],
     "overall_confidence": "exact",
     "caveats": []
@@ -234,14 +234,14 @@ data: { "type":"about:blank","title":"Meta load timeout","status":504,"code":"ME
 
 **关键规则**：
 
-1. **段即完整快照**：`revision=1` 即可完整渲染 3D 场景；`revision=2` 整体替换视图（不做增量合并）。
-2. **is_final=true** 后服务端关闭连接。
-3. **重连**：客户端保留 `Last-Event-ID`；服务端若能从 ring buffer（最后 64 帧）补发则补发，否则返回 410 + 新快照 URL。
+1. **段即完整快照**：`revision=1` 即可完整渲染 3D 场景；常规路径下 `revision=2` 整体替换视图（不做增量合并）。
+2. **is_final=true** 后服务端关闭连接；异常降级时允许 `revision=1` 即为最终帧（`is_final=true`）。
+3. **重连**：客户端保留 `Last-Event-ID`；v1.0 断线直接重连，服务端返回最新完整快照。（v1.1+ 可引入 ring buffer 补发机制）
 4. **不用于进度条**：进度条由前端依 revision / layers_used 自行计算，不走独立事件。
 
 #### 4.5.1 revision=1 最小可渲染字段集（首屏契约）
 
-> 对齐原则 3「结构 100% 正确」+ 原则 5「交互硬约束」：`revision=1` 的字段集是契约，不是尽力而为。
+> 对齐原则 3「结构 100% 正确」+ 原则 7「交互硬约束」：`revision=1` 的字段集是契约，不是尽力而为。
 
 **必填字段**（缺任一 → 前端不得尝试渲染，视为错误态）：
 
@@ -249,15 +249,15 @@ data: { "type":"about:blank","title":"Meta load timeout","status":504,"code":"ME
 |---|---|---|---|
 | `data.graph.nodes` | Block 层级节点（v1.0 最细粒度为 Block；Op/Tensor 槽位保留但可空） | config.num_hidden_layers + safetensors 扫描 | EXACT/INFERRED |
 | `data.graph.hierarchy` | 节点父子关系树（模型→层组→Block） | 结构推断 | INFERRED |
-| `data.graph.provenance` | 根级 Provenance（原则 9 强制） | pipeline 聚合 | — |
+| `data.graph.provenance` | 根级 Provenance（原则 11 强制） | pipeline 聚合 | — |
 | `data.profile.template_id` | `"A" \| "B" \| "C" \| "G"`（ADR-015） | Adapter 路由 | EXACT/INFERRED |
 | `data.profile.model_type` | HF `model_type` 字段原值 | config.json | EXACT |
 | `data.layout.positions` | 每个节点的 `[x,y,z]` **初步布局**（网格/环形，由 LayoutStrategy v1 实现） | LayoutEngine | ESTIMATED |
 | `data.layout.camera` | 相机初始 `{position, target, fov}` | 根据 scene bounds 计算 | ESTIMATED |
 
-**revision=1 允许缺失**（待 revision=2 填充）：
-- `data.graph.edges`（数据流边） — revision=1 可为空数组 `[]`，revision=2 填充
-- `data.estimate`（内存/FLOPS） — revision=1 可为 `null`，revision=2 填充
+**revision=1 允许退化**（待 revision=2 增强）：
+- `data.graph.edges`（数据流边） — revision=1 可为空数组 `[]`，revision=2 增强
+- `data.estimate`（内存/FLOPS） — revision=1 必须存在，但允许为快速估算值（`confidence=ESTIMATED`）
 - `data.profile.features` — revision=1 可为初步集合，revision=2 完善
 
 **前端行为契约**：
@@ -269,21 +269,23 @@ data: { "type":"about:blank","title":"Meta load timeout","status":504,"code":"ME
 
 #### 4.5.2 revision=1 期间 UI 交互契约（GPU Selector / PATCH）
 
-> 对齐原则 5「交互硬约束」+ 原则 3「结构正确」。revision=1 时 `estimate` 可为 null，但 UI 已渲染 GPU Selector / ConfigEditor，必须定义此窗口期的交互行为。
+> 对齐原则 7「交互硬约束」+ 原则 3「结构正确」。revision=1 与 revision=2 间隔通常 < 1s。
 
-| UI 元件 | revision=1（estimate=null） | revision=2 到达后 |
+| UI 元件 | revision=1（estimate 为快速估算） | revision=2 到达后 |
 |---|---|---|
-| `<GPUSelector>` | **可见但禁用**（`disabled` 置灰 + tooltip "显存估算加载中…"）；允许本地记录用户**意向选择**（存入 Zustand 临时槽位），不发送 PATCH | 启用；若有意向选择则自动应用并触发一次 PATCH |
-| `<ConfigEditor>` 字段 | **只读展示**当前 config（来自 revision=1 的 `profile.config_summary`）；禁止 PATCH 发起 | 启用，按 §4.6 正常流程 |
-| `<EstimatePanel>` | 显示骨架屏 + "计算中…" | 填充真实数值，带 provenance 徽标 |
-| 点选节点 / tooltip | **允许**（只读结构信息，不依赖 estimate） | 追加显存/FLOPs 面板 |
+| `<GPUSelector>` | **可见但默认禁用**（`disabled` 置灰 + tooltip "显存估算加载中…"） | 启用，正常交互 |
+| `<ConfigEditor>` 字段 | **默认只读展示**当前 config（来自 revision=1 的 `profile.config_summary`） | 启用，按 §4.6 正常 PATCH |
+| `<EstimatePanel>` | 显示快速估算值（可附“精算中”提示） | 用 revision=2 精确值替换 + provenance 徽标 |
+| 点选节点 / tooltip | **允许**（只读结构信息） | 追加显存/FLOPs 面板 |
 
 **实现要点**：
-- 前端 `canInteract = revision >= 2` 作为 PATCH / GPU 选择的唯一开关
-- revision=1 到 revision=2 间隔通常 < 1s（对齐 06 P0-10 延迟预算）；超过 3s 仍停留 revision=1 时 UI 顶部升级提示为 "首屏已就绪，估算耗时较长"，并把意向 GPU 选择暂存到 localStorage 防刷新丢失
-- 后端 revision=2 到达后若检测到 `Last-User-Intent` 头（前端在 revision=1 期间的选择落盘）存在，则 snapshot 带上与该 GPU 对应的 estimate（避免多一轮往返）
+- 前端 `canInteract = (is_final === true) || (revision >= 2)` 作为 PATCH / GPU 选择的唯一开关
+- 若 `revision=1 && is_final=true`（降级终态），前端立即解除 GPUSelector/ConfigEditor 禁用
+- 超过 3s 仍停留 revision=1 且 `is_final=false` → UI 顶部提示 "首屏已就绪，估算耗时较长"
 
-### 4.6 PATCH /config —— 配置热更新（原则 5 硬约束 + 原则 6 动态编辑）
+### 4.6 PATCH /config —— 配置热更新（原则 7 硬约束 + 原则 8 动态编辑）
+
+> 本节为 PATCH /config 响应格式的唯一事实源。
 
 ```
 PATCH /api/v1/stream/{org}/{repo}/config
@@ -296,26 +298,15 @@ Body:
     "hidden_size": 8192,
     "num_experts": 128,
     "num_experts_per_tok": 8,
-    "num_attention_heads": 64,
-    "num_key_value_heads": 8,
-    "moe_top_k": 8,
-    "vocab_size": 128000,
-    "max_position_embeddings": 8192,
-    "torch_dtype": "bfloat16",
-    "tp_size": 4,
-    "pp_size": 2,
-    "dp_size": 2,
-    "ep_size": 8,
-    "micro_batch_size": 1,
-    "global_batch_size": 64,
     "seq_len": 4096,
-    "grad_accum_steps": 8,
-    "activation_checkpointing": true
+    "micro_batch_size": 1,
+    "torch_dtype": "bfloat16",
+    "gpu_id": "a100_80g_sxm"
   },
   "session_id": "uuid"
 }
 
-→ 204 No Content（立即返回，不阻塞）
+→ 202 Accepted（立即返回，不阻塞；body 可包含 `{"estimated_wait_ms": ...}`）
 ```
 
 **后端处理链路**（11 §8 为契约权威源）：
@@ -327,6 +318,9 @@ Body:
 
 **交互响应预算（硬约束，见 §4.8）**：后端 < 200ms、端到端 < 300ms。
 
+> **v1.0 字段白名单**（8 项核心）：num_hidden_layers / hidden_size / num_experts / num_experts_per_tok / seq_len / micro_batch_size / torch_dtype / gpu_id。
+> 并行字段（tp/pp/dp/ep_size）和训练字段（global_batch_size / grad_accum_steps / activation_checkpointing）为 v1.1+/v1.2+ 扩展范围，v1.0 契约不暴露，待对应能力启用时随 `revision += 1` 扩展。
+
 **字段级校验**：超出字段类型/范围 → `400 CONFIG_OVERRIDE_INVALID`；跨字段冲突（如 `num_experts_per_tok > num_experts`）→ `422 CONFIG_OVERRIDE_IMPOSSIBLE`。校验失败不推 WS 事件。
 
 ### 4.7 WebSocket 推送 —— 热更新通道
@@ -335,10 +329,10 @@ Body:
 WS /api/v1/stream/{org}/{repo}/updates?session_id={uuid}
 ```
 
-**选型说明**：PATCH /config 热更新推送**采用 WebSocket**（而非复用原 SSE）。理由：
-- 双向低延迟，便于后续 v1.1 加入 client → server 控制帧（如 cancel / priority）；
-- 与主流 SSE 解耦，前端可在无主流 SSE 连接时独立订阅热更新；
-- 明确 session 语义：`session_id` 作为订阅路由键，同一 session 的所有 PATCH 回推到同一 WS。
+**架构约束**：SSE 仅用于冷启动的分段推送；PATCH /config 热更新推送**必须**采用 WebSocket（不得复用 SSE），原因：
+- 双向低延迟，便于 v1.1+ 加入 client → server 控制帧（如 cancel / priority）；
+- 与冷启动 SSE 流独立订阅，`session_id` 作为路由键将同一 session 的所有 PATCH 结果回推到同一 WS 连接；
+- 冷启动与热更新通道解耦，语义清晰。
 
 **Server → Client 消息**：
 
@@ -358,61 +352,58 @@ WS /api/v1/stream/{org}/{repo}/updates?session_id={uuid}
 
 **消息结构与 SSE `segment` 帧的 `data` 字段 1:1 对齐**（同一个 ModuleGraph / EstimateResult schema），前端 store 可复用 `replaceSnapshot()` 逻辑。
 
-#### 4.7.1 Session 生命周期（对齐原则 5 / 原则 8）
+#### 4.7.1 Session 生命周期（对齐原则 7 / 原则 10）
+
+> v1.0 简化为基础连接管理；细粒度 ping/timeout/重复检测/并发上限等机制视 v1.1 需要再引入。
+>
+> 唯一事实源：09 §5.1.18
 
 | 事件 | 行为 |
 |---|---|
-| **建立** | 首次 SSE（§4.5）返回 `session_id`（UUIDv4）；前端以此为 query 开启 WS |
-| **空闲超时** | 服务端无推送 **≥ 5 分钟** → 发送 ping；client 无回复再 10s 关闭（code=4408 "idle timeout"）|
-| **硬超时** | 单个 session 存活 **≥ 2 小时** → 服务端主动关闭（code=4410 "session expired"），前端需重新 GET /stream 拿新 session_id |
+| **建立** | 前端通过 `crypto.randomUUID()` 生成 `session_id`（UUIDv4），以此为 query 开启 WS，并在 PATCH /config 请求体中携带同一 `session_id`（见 §4.6 / §4.11） |
 | **页面离开** | `window.beforeunload` → 前端发 close（code=1001）；后端清理订阅键 |
-| **session_id 重复订阅** | 同一 session_id 再次 WS 连接 → 服务端**拒绝第二个**（code=4409 "duplicate session"），防止双连消费同一 revision 序列 |
-| **重连策略** | WS 断开后前端指数退避重连（200ms → 400ms → 800ms → 最多 5 次）；携带 `?last_revision=N` query；服务端若仍保有该 session 的 ring buffer（最后 32 帧）则补发缺失 revision，否则返回 close code=4426 "session not found"，前端必须重新 GET /stream |
+| **session_id 重复订阅** | 同一 session_id 再次 WS 连接 → 服务端**替换旧连接**（code=4409 "duplicate session replaced"），新连接接管 revision 序列（与 09 统一） |
+| **重连策略** | WS 断开后前端指数退避重连（200ms → 400ms → 800ms → 最多 5 次）；携带 `?last_revision=N` query；v1.0 断线直接重连获取最新快照，服务端若 session 已过期则返回 close code=4426 "session not found"，前端必须重新 GET /stream |
 | **revision 单调** | 同一 session 内 `revision` 严格单调递增；前端收到 revision ≤ 本地最大值的消息 → 丢弃（防乱序） |
 | **Last-User-Intent 头** | §4.5.2 提到的意向选择通过 WS 第一帧 `client_hello` 上报：`{"type":"client_hello","last_intent":{"gpu_id":"..."}}`；服务端据此在下一次 revision 中附带对应 estimate |
 
-**资源上限（v1.0）**：单实例 ≤ 100 并发 session；超出返回 503。session 状态仅存内存（不引入 Redis，对齐原则 1）。
+**资源上限（v1.0）**：session 状态仅存内存（不引入 Redis，对齐原则 1）。
 
 #### 4.7.2 Revision 竞态处理规则（SSE × WebSocket × PATCH）
 
-> 对齐原则 3「结构正确」+ 原则 5「首屏可交互」。revision=1 / 2 / ≥3 分别对应 SSE Phase A / SSE Phase B / PATCH 热更新（见 10 §Revision 类型）。以下规则覆盖所有交叉时序。
+> 对齐原则 3「结构正确」+ 原则 7「首屏可交互」。revision=1 / 2 / ≥3 分别对应 SSE Phase A / SSE Phase B / PATCH 热更新（见 10 §Revision 类型）。以下规则覆盖所有交叉时序。
 
 **T1. revision 全局单调**
 - 同一 session 的 SSE / WS 消息共享一个 revision 计数器，严格单调递增
 - 前端维护 `lastAppliedRevision`；收到 revision ≤ 本地最大 → 丢弃（§4.7.1 已定义）
 
 **T2. 用户在 revision=1 与 revision=2 之间发起 PATCH**
-- 前端侧：按 §4.5.2 contract，revision=1 期间 `<ConfigEditor>` / `<GPUSelector>` **禁用**，PATCH 不可能被触发。用户意向落盘到 `Last-User-Intent`（localStorage + WS `client_hello`），revision=2 到达后自动合并发起一次 PATCH
+- 前端侧：按 §4.5.2 contract，revision=1 期间 `<ConfigEditor>` / `<GPUSelector>` **禁用**，PATCH 不可能被触发
 - 后端侧：若客户端仍绕过 UI 发出 PATCH（手工 curl），服务端返回 `409 Conflict`，问题码 `SNAPSHOT_NOT_READY`，body `{detail: "wait for revision>=2"}`
 
-**T3. Phase B 加载（S3/S4/S5b）期间收到 PATCH**
-- 后端策略：**不取消**正在进行的 Phase B；让 Phase B 正常完成并推 revision=2，然后在同一任务队列**串行**处理 PATCH 产生 revision=3
-- 理由：取消 Phase B 会丢失已付出的计算（detect/estimate 结果），重算反而更慢；串行策略保证每个 revision 都是完整快照（对齐 §4.5 "段即完整快照"）
-- 用户可见性：PATCH 的 HTTP 202 响应包含 `estimated_wait_ms`（= 当前 Phase B 剩余预估时间 + PATCH 自身预算），前端据此显示 loading spinner 预期时长
+**T3. Phase B 期间收到 PATCH**
+- 后端**不取消** Phase B；让 Phase B 正常完成推 revision=2 后，再串行处理 PATCH 产生 revision=3
+- 对齐 §4.5「段即完整快照」，保证每个 revision 都是完整结果
 
-**T4. 快速连续多次 PATCH 的去重/排队**
-- 前端：300ms debounce（05 §5.7 #6）在 UI 层合并为单次 HTTP 请求；debounce 期内字段覆盖式更新（非累积 diff）
-- 后端：若前一个 PATCH 的 WS 推送尚未完成，后一个 PATCH 到达时**丢弃前一个的 pending 计算**（尚未产出 revision 的那个）并仅处理最新的；已产生 revision 的历史任务不回滚。确保 WS 侧 revision 序列不出现 "PATCH-A (revision=3) → PATCH-B (revision=4) → PATCH-A 迟到的 revision=3 覆盖" 这种竞态
-- 实现：后端维护 `session_id → current_patch_task` 单槽位，新 PATCH 替换时调用 `asyncio.Task.cancel()` 取消旧任务；被取消任务的 revision 号作废（不下发）
+**T4. 快速连续多次 PATCH**
+- 前端 300ms debounce（05 §5.7）合并为单次 PATCH；后端同一时刻仅处理一个 PATCH，新 PATCH 到达时取消前一个未完成的 PATCH 计算
+- 已产出 revision 的不回滚
 
-**T5. PATCH 的 revision 语义**
-- PATCH 总是基于**最新已下发**的 snapshot（revision=2 或更高），不基于 revision=1 的不完整数据
-- 若 Phase B 尚未完成 → 按 T3 串行等待；前端不应感知底层是 1 还是 2，因 UI 已禁用 PATCH 入口
-
-**T6. 断连期间的 PATCH**
-- WS 断开时前端队列不发 PATCH；按 §4.7.1 指数退避重连；连接恢复后，若本地有 pending 的意向字段，重新发起一次 PATCH
+> **T5/T6 断连/重连**：v1.0 依赖前端 300ms debounce + 后端单槽 PATCH 即可满足 ~10 用户场景。复杂的断连队列、Last-User-Intent 头持久化等机制推迟到 v1.1 视实际需要引入。
 
 ---
 
 ### 4.8 交互响应预算（硬约束，Phase 1 起必达）
 
-> 对齐 README 原则 5 例外条款与 11 §8.3。交互延迟属功能正确性，不因"前期不做性能优化"而豁免。
+> 唯一事实源：README §交互响应预算
+>
+> 对齐 README 原则 7 例外条款与 11 §8.3。交互延迟属功能正确性，不因"前期不做性能优化"而豁免。
 
 | 路径 | 预算 | 类型 |
 |---|---|---|
 | PATCH /config 后端处理（接收 → WS 推送离开服务端） | **< 200ms** | 硬约束 |
 | PATCH /config 端到端（前端发起 → 3D 重渲染可见） | **< 300ms** | 硬约束 |
-| WebSocket 单条消息延迟（本机） | **< 50ms** | 硬约束 |
+| WebSocket 单条消息延迟（本机） | < 50ms | 观测指标 |
 | 模块点选 / 悬停高亮 | **< 50ms** | 硬约束 |
 | 动画时间轴拖动（scrub） | **< 16ms/frame（60fps）** | 硬约束 |
 | 视角切换 / 相机动画 | **< 16ms/frame** | 硬约束 |
@@ -422,7 +413,7 @@ WS /api/v1/stream/{org}/{repo}/updates?session_id={uuid}
 
 ### 4.9 扩展点内省端点
 
-为支撑原则 6「可扩展架构」的可观测性与前端选择器的自动填充，提供以下只读端点。返回内容来自后端对应 registry 的实时枚举。
+为支撑原则 8「可扩展架构」的可观测性与前端选择器的自动填充，提供以下只读端点。返回内容来自后端对应 registry 的实时枚举。
 
 #### 4.9.1 `GET /api/v1/gpus`
 
@@ -463,30 +454,21 @@ WS /api/v1/stream/{org}/{repo}/updates?session_id={uuid}
 
 > v1.0 仅 `inference_v1`；v1.1 将追加 `megatron_tp_pp_sp` / `fsdp_zero1/2/3`。
 
-#### 4.9.4 `GET /api/v1/parallelism-strategies`
-
-返回已注册 `ParallelismStrategy` 列表（11 §4）。
-
-```json
-[]
-```
-
-> v1.0 返回空数组（接口定义就位、无实现）。v1.2 将出现 `TP` / `PP` / `DP` / `EP` / `CP` / `SP` / `TP+PP` / `TP+PP+DP` 等条目。
-
-### 4.10 缓存策略（分段 + L0/L1 + SHA 键）
+> 并行策略相关 API 设计统一迁移到 v1.2+ parking，不在 v1.0 API 主文档展开。
+### 4.10 缓存策略（v1.0 两段 + L0/L1 + SHA 键）
 
 ```
-两层 + 分段 TTL（详见 09 §5.1.7）:
+两层 + 两段 TTL（权威定义见 09 §6.3）:
 
 L0: 进程内 TTLCache (maxsize=128, 线程锁保护)
-    — 按 segment 分开：config / tree / params / flow / estimate / layout
-    — 每段独立 TTL（config 1h，layout 5min）
+    — fast_snapshot / full_snapshot 两段
+    — 每段独立 TTL
 
 L1: 文件系统 JSON
     — cache_key = f"{model_id}:{resolved_commit_sha}"   (SHA 进 key，消除强推后读到旧数据)
     — 原子写：tempfile + os.replace
-    — 每段独立 TTL
-
+    — fast/full 两段独立 TTL
+```
 数据源: HF Hub API (+ huggingface_hub 本地缓存)
     — 注意：HF Hub 不是缓存层，是最终数据源
 
@@ -524,7 +506,7 @@ es.addEventListener('error', (e) => {
   es.close();
 });
 
-// —— 配置热更新（原则 5 硬约束）——
+// —— 配置热更新（原则 7 硬约束）——
 const sessionId = crypto.randomUUID();
 const ws = new WebSocket(
   `/api/v1/stream/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/updates?session_id=${sessionId}`
@@ -542,7 +524,7 @@ async function patchConfig(overrides: Partial<ConfigOverrides>) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ overrides, session_id: sessionId }),
   });
-  // 无需等待：204 立即返回，更新经 WS 抵达
+  // 无需等待：202 立即返回，更新经 WS 抵达
 }
 ```
 
@@ -551,7 +533,7 @@ async function patchConfig(overrides: Partial<ConfigOverrides>) {
 > **原则 1（非商业化、内部工具）**：v1.0 **不做** public-launch 级安全硬化。不设匿名 rate limit、SSO、CAPTCHA、reCAPTCHA、配额、计费、多租户隔离。
 >
 > 仅保留以下最小自卫项（不视为硬约束，属于良好实践）：
-> - `trust_remote_code=False`（自定义架构走 Template G + `INFERRED` 徽标，不执行远端代码）
+> - `trust_remote_code` 默认 `True`（详见 09 §2 / 06 P0-13）：Path A 启用远程自定义代码产出 `EXACT` 徽标；可通过 `TRUST_REMOTE_CODE=false` 降级至 Path B（Template G + `INFERRED` 徽标 + caveats 标注）
 > - 下载大小上限（config ≤ 256KB、README ≤ 2MB、safetensors header-only ≤ 16MB），避免误操作打爆本地磁盘
 > - `model_id` 正则收紧：`^(?![.-])[A-Za-z0-9][A-Za-z0-9._-]{0,95}/(?![.-])[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`
 >

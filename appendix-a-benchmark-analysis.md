@@ -1,6 +1,6 @@
 # 附录 A：标杆产品技术深度分析与借鉴
 
-> 本文档从主设计文档 `serialized-seeking-clock.md` Section 1.1.1 提取。
+> 本文档从原始内部设计稿 Section 1.1.1 提取。
 > 包含 Netron、Google Model Explorer、Transformer Explainer、LLM Viz 四个标杆产品的源码级分析。
 
 ---
@@ -56,7 +56,7 @@
 
 | 产品 | 图数据表示 | 状态管理 | 对我们的启示 |
 |---|---|---|---|
-| Netron | 扁平节点/边列表 + 类型映射 | 全局单例 View 对象 | 后端 API 返回扁平 `tree: TreeNode[]` 即可 |
+| Netron | 扁平节点/边列表 + 类型映射 | 全局单例 View 对象 | 后端 API 返回扁平 `graph: ModuleGraph` 即可 |
 | Model Explorer | 嵌套 GroupNode 树 + 每组独立子图 | RxJS Observable 流 | 支持层级展开的树结构必须有 `children` 嵌套 |
 | Transformer Explainer | 硬编码 GPT-2 结构 + Svelte stores | Svelte writable stores | 前端 Zustand store 设计参考其分层 store 模式 |
 | LLM Viz | 枚举式模型定义 + 布局计算分离 | React state + 自定义事件 | 数据(ModelDef)与布局(ModelLayout)分离是好模式 |
@@ -75,10 +75,10 @@
 
 | 技术要点 | 我们的借鉴 |
 |---|---|
-| **GPU 实例化渲染 + SDF 片段着色器**：单个 `PlaneGeometry(1,1)` 模板 + `InstancedBufferAttribute` 渲染所有节点，片段着色器用 SDF 绘制圆角矩形，无需纹理 | **核心借鉴**：R3F 的 `<Instances>` 组件本质上就是这个技术。MoE 384 专家网格直接使用此方案 |
+| **GPU 实例化渲染 + SDF 片段着色器**：单个 `PlaneGeometry(1,1)` 模板 + `InstancedBufferAttribute` 渲染所有节点，片段着色器用 SDF 绘制圆角矩形，无需纹理 | **核心借鉴**：R3F 的 `<Instances>` 组件本质上就是这个技术。MoE 256 专家网格直接使用此方案 |
 | **分屏同步对比**：双面板独立缩放/平移，节点名匹配 + 自定义 JSON 映射 + 差异高亮（红=删除，绿=新增） | **直接采纳**：模型对比页面实现双 Canvas 同步交互 |
 | **层级布局分治**：每个 GroupNode 独立布局，而非整张图一次布局 | **直接采纳**：按层级（模型 → 层 → Attention/MLP → 子组件）分级展开和布局 |
-| **LOD 文字/颜色混合**：远距离节点背景色混向中性色，文字标签超出阈值隐藏 | **直接采纳**：R3F 的 `<LOD>` 组件 + 自定义距离回调实现多级细节 |
+| **LOD 文字/颜色混合**：远距离节点背景色混向中性色，文字标签超出阈值隐藏 | **Phase N 候选**：R3F 的 `<LOD>` 组件 + 自定义距离回调实现多级细节 |
 | **Node Data Provider 叠加**：在节点上方直接渲染量化数据分布条 | **借鉴**：在 3D 层块上叠加参数量比例条或量化状态指示器 |
 | **Angular zone 优化**：鼠标事件监听器注册在 zone 之外，避免不必要的变更检测 | 对应到 React：使用 `useFrame` 而非 React state 驱动高频动画，避免 React 重渲染 |
 
@@ -102,32 +102,27 @@
 | **引导式 Walkthrough**：10 个步骤组件精确对应 forward pass，每步控制相机位置、块体高亮（透明度 0-1）、文字标注 | **直接采纳**：实现 "Guided Tour" 模式 — 相机沿推理路径飞越，逐步高亮当前模块并显示说明 |
 | **多 Pass 渲染**：Blur/Glow Pass → Geometry → Block Lighting → Thread → Opaque → Arrow → Overlay → Overlay2D | 简化采纳：R3F 通过 `<EffectComposer>` + `<Bloom>` + `<Selection>` + `<Select>` 实现类似的多 Pass 选择性 Bloom 效果 |
 | **弹簧物理相机**：临界阻尼（`2 * sqrt(mass * tension)`）相机动画，667ms 过渡 | **直接采纳**：R3F `<CameraControls>` + react-spring 弹簧物理驱动相机飞越 |
-| **按需渲染**：非持续渲染循环，仅状态变化时重绘 | **直接采纳**：R3F Canvas 设置 `frameloop="demand"`，仅需要时渲染 |
+| **按需渲染**：非持续渲染循环，仅状态变化时重绘 | **直接采纳**：R3F Canvas 设置 `frameloop="demand"`，仅需要时渲染。服务于交互响应硬约束（ADR-006），非节流式性能优化 |
 
 ## 借鉴优先级矩阵
 
-<!-- TODO: align phase numbering with 06 — 此表 "实现阶段" 列使用旧 Phase 3/4/5/6 标签，
-     当前 06 采用 Phase 0 (Tracer Bullet) / Phase 1 (1a/1b/1c/1d) / Phase 2 (扩展演练) / Phase N (性能优化)。
-     旧→新映射不是 1:1（例如旧 Phase 3 偏性能基础，可能对应新 Phase 1b 或 Phase N；
-     旧 Phase 6 分屏对比对应 Phase N 或 v1.1+），需产品/架构确认后再替换。 -->
-
 | 优先级 | 技术 | 来源 | 实现阶段 | 影响 |
 |---|---|---|---|---|
-| P0 | GPU 实例化渲染（MoE 专家网格） | Model Explorer | Phase 3 | 性能基础 |
-| P0 | 3D 空间隐喻布局 | LLM Viz | Phase 3 | 核心体验 |
-| P0 | Web Worker 布局计算 | Netron + Model Explorer | Phase 3 | 响应性 |
-| P0 | 层级展开/折叠 | Model Explorer | Phase 3 | 大模型可用性 |
-| P1 | GSAP 分段动画序列 | Transformer Explainer | Phase 4 | 叙事感 |
-| P1 | Guided Tour 相机飞越 | LLM Viz | Phase 4 | 教育价值 |
-| P1 | LOD 多级细节 | Model Explorer | Phase 3 | 多尺度体验 |
-| P1 | 分屏同步对比 | Model Explorer | Phase 6 | 差异化功能 |
-| P2 | 模块元数据文档系统 | Netron | Phase 5 | 信息深度 |
-| P2 | 选择性 Bloom 发光 | LLM Viz | Phase 3 | 视觉品质 |
-| P2 | 按需渲染 | LLM Viz | Phase 3 | 性能优化 |
+| P0 | GPU 实例化渲染（MoE 专家网格） | Model Explorer | Phase 1b | 性能基础 |
+| P0 | 3D 空间隐喻布局 | LLM Viz | Phase 1b | 核心体验 |
+| P0 | Web Worker 布局计算 | Netron + Model Explorer | Phase 1b | 响应性 |
+| P0 | 层级展开/折叠 | Model Explorer | Phase 1b | 大模型可用性 |
+| P1 | GSAP 分段动画序列 | Transformer Explainer | Phase 1c | 叙事感 |
+| P1 | Guided Tour 相机飞越 | LLM Viz | Phase 1c | 教育价值 |
+| P1 | LOD 多级细节 | Model Explorer | Phase N | 多尺度体验 |
+| P1 | 分屏同步对比 | Model Explorer | v1.1+ | 差异化功能 |
+| P2 | 模块元数据文档系统 | Netron | v1.1 | 信息深度 |
+| P2 | 选择性 Bloom 发光 | LLM Viz | Phase 1b | 视觉品质 |
+| P2 | 按需渲染 | LLM Viz | Phase N（已在 ADR-006 采纳为 v1.0） | 性能优化 |
 | P3 | 浏览器内推理 + 真实 tensor | Transformer Explainer | v2.0 | 终极 "X-Ray" |
 | P3 | 逐权重数据纹理可视化 | LLM Viz | v2.0 | 终极深度 |
 
-## 完整借鉴特性清单（36 项，按优先级分层）
+## 完整借鉴特性清单（26 项，按优先级分层）
 
 ### TIER 1: 必须实现（10 项）
 
@@ -156,7 +151,7 @@
 | 16 | **相同层自动检测** | Model Explorer | Both | 选中一层自动高亮所有结构相同的层 |
 | 17 | **输入/输出链追踪** | Model Explorer | Both | 选中节点高亮完整祖先+后代链，其余变暗 |
 | 18 | **弹簧物理相机** | LLM Viz | 3D | 临界阻尼相机过渡（667ms），球坐标系统 |
-| 19 | **双重 LOD 策略** | LLM Viz | 3D | 小块隐藏 + 多头合并，>12 层自动简化 |
+| 19 | **双重 LOD 策略** (Phase N) | LLM Viz | 3D | 小块隐藏 + 多头合并，>12 层自动简化 |
 | 20 | **独立 HTML 导出** | BertViz | Both | 下载为自包含 HTML 文件，离线可查看 |
 
 ### TIER 3: 锦上添花（6 项，v1.1+）

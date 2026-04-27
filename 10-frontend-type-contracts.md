@@ -4,22 +4,22 @@
 >
 > **权威性**：本文档是前端 TypeScript 类型的**唯一事实源**。后端 Pydantic 权威源为 [09 §5.1.2](09-backend-detailed-design.md)；API 表层契约以 [04](04-api-design.md) 为准；扩展点契约以 [11](11-extension-points.md) 为准。
 >
-> **对齐规则**：本文件与 09 §5.1.2 必须 1:1 对应；若二者冲突，**以 09 为准**并在本文件内相应位置追加 `// TODO(10): ...` 注释，由文档维护者回流修复。
+> **对齐规则**：本文件与 09 §5.1.2 必须 1:1 对应（按 `anchor:provenance` / `anchor:module-node` / `anchor:data-edge` / `anchor:module-graph` / `anchor:architecture-profile` / `anchor:memory-breakdown` / `anchor:estimate-result` 逐类对照）；若二者冲突，**以 09 为准**，请直接提交 PR 同步修正本文件。
 >
 > **适用范围**：所有前端 `frontend/src/types/**` 必须直接或通过 re-export 使用本文件定义的类型。**禁止**在组件/store/hook 中私造同名类型。
 
-## 10.1 类型对齐原则（对齐原则 3 / 6 / 9）
+## 10.1 类型对齐原则（对齐原则 3 / 8 / 11）
 
 - **原则 3（结构与数据流 100% 正确）**：前端 TS `interface` 与后端 Pydantic model 严格 1:1 对应，字段名、字段类型、可选性必须一致。前端不得"就地适配"后端字段——任何 UI-only 衍生字段必须在本文件显式声明，并以注释 `// UI-only` 标注。
-- **原则 6（≤ 1 文件 + 1 注册）**：新增架构 / 动画层 / 并行策略 / 显存估算器 / GPU 型号时，只允许在本文件追加一个 `interface` + 在 `frontend/src/types/index.ts` 追加一次 re-export。禁止修改现有契约的既有字段形状。
-- **原则 9（Provenance 强制）**：任何面向用户的数据结构（`ModuleNode` / `DataEdge` / `ArchitectureProfile` / `MemoryBreakdown` / `EstimateResult` / `ModuleGraph` 根级）**必须**包含 `provenance: Provenance` 字段或以 `WithProvenance<T>` 包裹。裸数据视为契约违反。
+- **原则 8（≤ 1 文件 + 1 注册）**：新增架构 / 动画层 / 并行策略 / 显存估算器 / GPU 型号时，只允许在本文件追加一个 `interface` + 在 `frontend/src/types/index.ts` 追加一次 re-export。禁止修改现有契约的既有字段形状。
+- **原则 11（Provenance 强制）**：任何面向用户的数据结构（`ModuleNode` / `DataEdge` / `ArchitectureProfile` / `MemoryBreakdown` / `EstimateResult` / `ModuleGraph` 根级）**必须**包含 `provenance: Provenance` 字段或以 `WithProvenance<T>` 包裹。裸数据视为契约违反。
 - **TypeScript 风格约束**（本文件强制）：
   - 对象形状一律用 `interface`（可扩展、可 merge、便于生成 d.ts）。
   - 未知/可变结构一律用 `Record<string, unknown>`，**禁止 `any`**。
   - 判别联合（discriminated union）用字符串字面量：`'exact' | 'inferred' | 'estimated'`。
   - 后端所有权字段标记 `readonly`；仅前端 PATCH /config 产生的字段可写。
 
-## 10.2 Provenance（原则 9 强制）
+## 10.2 Provenance（原则 11 强制）
 
 > 对齐 04 §4.2.1 + 09 §5.1.2。
 
@@ -41,8 +41,10 @@ export interface Provenance {
     | 'meta_device'
     | 'safetensors_metadata'
     | 'config_json'
-    | 'ast_parse'        // v1.1
-    | 'config_override'; // PATCH /config 产生
+
+    | 'config_override'     // PATCH /config 产生
+    | 'memory_estimator'    // 显存/FLOPS 估算器
+    | 'pipeline_aggregate'; // 根级聚合 provenance
   readonly confidence: Confidence;
   readonly caveats: readonly string[];
 }
@@ -50,31 +52,32 @@ export interface Provenance {
 
 ## 10.3 ModuleGraph（3D 渲染唯一数据源）
 
-> 对齐 04 §4.2.2 + 09 §5.1.2。`ModuleGraph` 是 R3F 场景、2D 拓扑、显存估算、动画层的**唯一** graph 输入源。
+> 后端 Pydantic 唯一事实源：09 §5.1.2。本文件为前端 TS 镜像。
+
+> 对齐 04 §4.2.2 + 09 §5.1.2。`ModuleGraph` 是 R3F 场景、2D 拓扑 (v1.1+)、显存估算、动画层的**唯一** graph 输入源。
 
 ```typescript
 /**
- * 节点粒度。v1.0 仅产出 "block"；"layer" / "op" / "tensor" 为原则 6 结构粒度预留槽位。
- * 对齐 09 §5.1.2 ModuleNode.level（已于 2026-04-25 回填）+ 04 §4.2.2。
+ * 节点粒度（v1.0 固定）。
+ * 对齐 09 §5.1.2 ModuleNode.level + 04 §4.2.2。
  */
-export type ModuleLevel = 'layer' | 'block' | 'op' | 'tensor';
+export type ModuleLevel = 'block';
 
 /**
- * 边类型（对齐 04 §4.2.2 + 11 §7 DataFlowDirection 扩展点）。
- * v1.0 仅产出 data_flow / residual / skip_connection / branch_merge；
- * gradient_flow / activation_checkpoint / gradient_accumulation 留待 v1.1。
+ * 边类型（v1.0 契约）。
+ * v1.1+ 扩展类型（gradient_flow 等）在对应版本契约文档中追加，不提前进入 v1.0 类型面。
  */
 export type EdgeType =
   | 'data_flow'
   | 'residual'
   | 'skip_connection'
-  | 'branch_merge'
-  | 'gradient_flow'
-  | 'activation_checkpoint'
-  | 'gradient_accumulation';
+  | 'branch_merge';
 
-/** 方向。v1.0 仅产出 'forward'。 */
-export type EdgeDirection = 'forward' | 'backward' | 'bidirectional';
+/**
+ * 边方向（v1.0 契约）。
+ * v1.1+ 扩展方向在对应版本契约中追加。
+ */
+export type EdgeDirection = 'forward';
 
 /**
  * 单个模块节点。对应后端 `ModuleNode`。
@@ -112,8 +115,8 @@ export interface HierarchyTree {
 }
 
 /**
- * 模型图。3D 渲染、2D 拓扑、动画层、显存估算共享同一份结构。
- * 根级 provenance 聚合整图置信度（09 §5.1.2 ModuleGraph.provenance 已于 2026-04-25 回填，对齐 04 §4.2.2）。
+ * 模型图。3D 渲染、2D 拓扑 (v1.1+)、动画层、显存估算共享同一份结构。
+ * 根级 provenance 聚合整图置信度（对齐 09 §5.1.2 ModuleGraph.provenance + 04 §4.2.2）。
  */
 export interface ModuleGraph {
   readonly nodes: Record<string, ModuleNode>;
@@ -125,17 +128,17 @@ export interface ModuleGraph {
 
 ## 10.4 ArchitectureProfile
 
-> 对齐 04 §4.2.3 + 09 §5.1.2。驱动 Template A/B/C/G 选型与 2D/3D 布局。
+> 对齐 04 §4.2.3 + 09 §5.1.2。驱动 Template A/B/C/G 选型与 3D 布局（2D 布局 v1.1+）。
 
 ```typescript
 /**
- * 前端渲染模板 ID。未识别架构回退到 "G"（非静默回退 LLaMA，对齐原则 8）。
+ * 前端渲染模板 ID。未识别架构回退到 "G"（非静默回退 LLaMA，对齐原则 10）。
  */
 export type TemplateId = 'A' | 'B' | 'C' | 'G';
 
 /**
  * 架构画像。
- * 对齐 09 §5.1.2 ArchitectureProfile.template_id（已于 2026-04-25 回填）+ 04 §4.2.3 + ADR-015。
+ * 对齐 09 §5.1.2 ArchitectureProfile.template_id + 04 §4.2.3 + ADR-015。
  */
 export interface ArchitectureProfile {
   readonly model_type: string;                       // "llama" | "deepseek_v3" | "llama_moe" | ...
@@ -149,22 +152,18 @@ export interface ArchitectureProfile {
 
 ## 10.5 MemoryBreakdown / EstimateResult
 
-> 对齐 04 §4.2.4。v1.0 是**推理版**：仅 weights + kv_cache + activations。训练版字段（gradients / optimizer_states / comm_buffer）占位预留 `null`。
+> 对齐 04 §4.2.4。v1.0 是**推理版**：仅 weights + kv_cache + activations。
 
 ```typescript
 /**
- * 显存细分。v1.0 仅填前三项 + 汇总；后三项（训练版）v1.0 均为 null。
- * 对齐 09 §5.1.2 MemoryBreakdown（已于 2026-04-25 由 dict 升级为结构化类型）+ 04 §4.2.4。
+ * 显存细分（v1.0 推理版）。
+ * 对齐 09 §5.1.2 MemoryBreakdown + 04 §4.2.4。
  */
 export interface MemoryBreakdown {
   // v1.0 必填
   readonly weights_bytes: number;
   readonly kv_cache_bytes: number;
   readonly activations_bytes: number;
-  // v1.1 预留（v1.0 均为 null）
-  readonly gradients_bytes: number | null;
-  readonly optimizer_states_bytes: number | null;
-  readonly comm_buffer_bytes: number | null;
   // 汇总
   readonly per_device_total_bytes: number;
   readonly gpu_capacity_bytes: number;
@@ -173,15 +172,12 @@ export interface MemoryBreakdown {
 }
 
 /**
- * 估算结果。flops/kv_cache/communication/latency 为后端各估算器的自由输出槽，
- * 前端仅按需消费（数字卡片 / tooltip），不强制结构。
+ * 估算结果（v1.0）。
  */
 export interface EstimateResult {
   readonly memory: MemoryBreakdown;
   readonly flops: Record<string, unknown>;
   readonly kv_cache: Record<string, unknown> | null;
-  readonly communication: Record<string, unknown> | null;  // 并行通信量（v2.0）
-  readonly latency: Record<string, unknown> | null;
   readonly provenance: Provenance;
 }
 ```
@@ -210,7 +206,7 @@ export interface CameraConfig {
   readonly target?: readonly [number, number, number];
   readonly fov?: number;
   readonly up?: readonly [number, number, number];
-  readonly [k: string]: unknown;
+  readonly extra?: Record<string, unknown>;
 }
 
 /** 场景包围盒。 */
@@ -224,6 +220,7 @@ export interface LayoutResult {
   readonly positions: Record<string, Position3D>;
   readonly camera: CameraConfig;
   readonly bounds: SceneBounds;
+  readonly provenance: Provenance;             // confidence = ESTIMATED
 }
 ```
 
@@ -234,7 +231,7 @@ export interface LayoutResult {
 ```typescript
 /**
  * 为任意对象补全 `provenance` 字段。
- * 新增面向用户的结构时应优先使用 WithProvenance<T>，避免遗漏原则 9。
+ * 新增面向用户的结构时应优先使用 WithProvenance<T>，避免遗漏原则 11。
  */
 export type WithProvenance<T extends object> = T & { readonly provenance: Provenance };
 
@@ -249,6 +246,7 @@ export type RequiresProvenance<T> = T extends { provenance: Provenance } ? T : n
  * 前端徽标直接消费此对象；不依赖 body 内的分散 Provenance。
  */
 export interface ProvenanceSummary {
+  readonly source: string;                           // 需对齐后端 SSE provenance_summary 产出
   readonly layers_used: readonly string[];
   readonly overall_confidence: Confidence;
   readonly caveats: readonly string[];
@@ -270,6 +268,18 @@ export type Revision = 1 | 2 | number;
 
 /**
  * SSE / WS 共用的数据体。整体替换，不做增量合并（04 §4.5 第 1 条）。
+ *
+ * ### revision=1 契约（对齐 04 §4.5）
+ *
+ * 当 `revision === 1`（Phase A，config_json + safetensors_metadata 快速响应）时：
+ * - `estimate` **必须存在**（快速估算值，`confidence=ESTIMATED`）。
+ * - `graph.edges` **可能为空数组 `[]`** —— 数据流边尚未增强，revision=2 完善。
+ * - `profile.features` **可能不完整** —— 仅包含初步特征集合，revision=2 完善。
+ *
+ * **前端消费要求**：
+ * - `estimate` 可直接渲染，但需展示“快速估算”状态。
+ * - 渲染 edges 时需容忍空数组（不报错、不显示 placeholder 错误态）。
+ * - features 徽标组件需容忍不完整集合，revision=2 到达后原地刷新。
  */
 export interface SnapshotData {
   readonly graph: ModuleGraph;
@@ -281,6 +291,9 @@ export interface SnapshotData {
 /**
  * SSE `segment` 帧（04 §4.5）。
  * v1.0 `segment` 固定为 "full"；分段字段保留用于 v1.1+ 细粒度推送。
+ *
+ * revision=1 时 data.estimate 为快速估算值，data.graph.edges 可能为空数组，
+ * data.profile.features 可能不完整。前端需防御性消费并在 revision=2 原地刷新。
  */
 export interface SseSegmentEvent {
   readonly segment: 'full';                          // v1.1 可扩展为 "config"|"tree"|"params"|"flow"|"estimate"|"layout"
@@ -315,7 +328,11 @@ export type ErrorCode =
   | 'GPU_SPEC_NOT_FOUND'
   | 'META_LOAD_TIMEOUT'
   | 'HUB_UNAVAILABLE'
-  | 'INTERNAL';
+  | 'INTERNAL'
+  | 'TRUST_REMOTE_CODE_BLOCKED'
+  | 'SCHEMA_VALIDATION_FAILED'
+  | 'SESSION_EXPIRED'
+  | 'SNAPSHOT_NOT_READY';
 
 /**
  * WebSocket Server → Client 消息（04 §4.7）。
@@ -353,28 +370,16 @@ export type StreamEvent =
  *   3. CI schema diff 通过后方可合并（见 10.10）。
  */
 export interface ConfigOverride {
-  // 结构尺寸
+  // v1.0 白名单（8 项，与 04 §4.6 / 11 §8.1 对齐）
   num_hidden_layers?: number;
   hidden_size?: number;
   num_experts?: number;
   num_experts_per_tok?: number;
-  num_attention_heads?: number;
-  num_key_value_heads?: number;
-  moe_top_k?: number;
-  vocab_size?: number;
-  max_position_embeddings?: number;
-  torch_dtype?: 'bfloat16' | 'float16' | 'float32' | 'int8' | string;
-  // 并行
-  tp_size?: number;
-  pp_size?: number;
-  dp_size?: number;
-  ep_size?: number;
-  // 训练/推理运行时
-  micro_batch_size?: number;
-  global_batch_size?: number;
   seq_len?: number;
-  grad_accum_steps?: number;
-  activation_checkpointing?: boolean;
+  micro_batch_size?: number;
+  torch_dtype?: 'bfloat16' | 'float16' | 'float32' | 'int8' | string;
+  gpu_id?: string;                    // GPU spec ID from gpu-catalog.yaml
+  // v1.1+/v1.2+ 扩展字段（并行 / 训练）在对应能力启用时追加，启用前不出现在本 interface
 }
 
 /** PATCH /config 请求体。 */
@@ -390,17 +395,13 @@ export interface ConfigOverrideRequest {
 
 ```typescript
 /**
- * L1-L4 动画层标签（对齐原则 6 动画精细度扩展）。
+ * v1.0 动画层标签。
  * - L1_structure : Stage-1 结构动画
  * - L2_dataflow  : Stage-2 数据流动画（Attention QKV / MoE / Residual）
- * - L3_heatmap   : Stage-3 数值热力（v1.1+）
- * - L4_parallelism: Stage-4 并行策略动画（v1.2+）
  */
 export type AnimationLayerId =
   | 'L1_structure'
-  | 'L2_dataflow'
-  | 'L3_heatmap'
-  | 'L4_parallelism';
+  | 'L2_dataflow';
 
 /**
  * 共享时间轴上下文。
@@ -432,7 +433,13 @@ export interface AnimationContext<TTimeline = unknown> {
   - 前端加 `readonly`（后端无对应概念）。
   - **UI-only 衍生字段**：必须在 `interface` 内以 `// UI-only` 注释标注且后端完全无此字段。
   - 联合字面量集合：前端允许是后端的子集（收紧），但**不允许**是超集（放宽）。
-- **破坏性变更流程**：任何在 10 中修改既有字段类型/可选性的改动，必须同时提交 09 §5.1.2 的对应改动；PR 标签 `schema-breaking` 自动 CC 前端 + 后端 owner，并要求 `revision` 字段 +1（对齐 04 §4.5 向前兼容规则 + 原则 6 数据契约稳定性）。
+- **破坏性变更流程**：任何在 10 中修改既有字段类型/可选性的改动，必须同时提交 09 §5.1.2 的对应改动；PR 标签 `schema-breaking` 自动 CC 前端 + 后端 owner，并要求 `revision` 字段 +1（对齐 04 §4.5 向前兼容规则 + 原则 8 数据契约稳定性）。
+
+---
+
+## 变更日志
+
+- 2026-04-25：创建。与 09 §5.1.2 / 04 1:1 对齐。
 
 ---
 

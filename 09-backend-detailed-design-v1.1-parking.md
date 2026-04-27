@@ -34,7 +34,7 @@
 | 6 | 扩散模型结构检测（UNet/DiT、VAE、文本编码器、调度器、ControlNet） | P1 | 推迟至 v1.1+ | `[新增] services/detectors/diffusion.py` | `detect_denoiser_type()`, `detect_vae()`, `detect_text_encoders()`, `detect_scheduler()`, `detect_controlnet()` | #1, #2, #9 | v1.1 | H |
 | 7 | VLA 结构检测（动作头、本体感知编码器、动作 tokenizer） | P1 | 推迟至 v1.1+ | `[新增] services/detectors/vla.py` | `detect_action_head()`, `detect_proprio_encoder()`, `detect_action_tokenizer()` | #1, #2, #9 | v1.1 | M |
 | 8 | 世界模型结构检测（帧编码器、动力学模型、时序建模、动作条件注入） | P1 | 推迟至 v1.1+ | `[新增] services/detectors/world_model.py` | `detect_frame_encoder()`, `detect_dynamics_model()`, `detect_temporal_modeling()` | #1, #2, #9 | v1.1 | M |
-| 22 | transformers 模型结构源码解析（AST 解析 `modeling_*.py`） | P0（错标） | 推迟至 v1.1+ | `[新增] services/model_inspector.py` | `inspect_model_class(config) → ModuleHierarchy`, `extract_forward_chain()`, `map_parallel_points()` | #1 | v1.1 | H |
+| 22 | transformers 模型结构源码解析（AST 解析 `modeling_*.py`） | P0（错标） | 推迟至 v1.1+ | `[新增] services/pipeline/ast_parser.py (v1.1)` | `inspect_model_class(config) → ModuleHierarchy`, `extract_forward_chain()`, `map_parallel_points()` | #1 | v1.1 | H |
 
 **v1.0 替代策略**：以上能力在 v1.0 均不交付，`ArchitectureAdapter` 在无法识别时走 `GenericAdapter`（Template G，`INFERRED` 徽标）；AST 解析以 meta-device + safetensors 双路径替代。
 
@@ -42,7 +42,7 @@
 
 ## [v1.1+ PARKING] 术语/架构广度 — Template D/E/F
 
-v1.0 架构模板按原则 8 冻结为 **A/B/C/G** 四种（对齐 ADR-015）。早期文档曾描述 7 种模板（A-G），其余三种并入本 parking：
+v1.0 架构模板按原则 10 冻结为 **A/B/C/G** 四种（对齐 ADR-015）。早期文档曾描述 7 种模板（A-G），其余三种并入本 parking：
 
 | 模板 | 对应架构族（示例） | v1.0 决议 |
 |---|---|---|
@@ -50,13 +50,13 @@ v1.0 架构模板按原则 8 冻结为 **A/B/C/G** 四种（对齐 ADR-015）。
 | E | Hybrid Mamba / Jamba（attention + SSM 混合） | v1.1+：需引入 SSMDetector（见 09 §5.2 补充修订 #24） |
 | F | Encoder-Decoder（T5 / Flan-T5 / BART） | v1.1+：需扩展 DataFlowDirection 与 ModuleGraph 双分支表示 |
 
-**v1.0 兜底规则**：任何不满足 Template A 三特征（RoPE + RMSNorm + SwiGLU/GatedMLP）的模型一律走 Template G（见 09 §5.1.20），**不得**默认回退至 Template A（原则 8）。
+**v1.0 兜底规则**：任何不满足 Template A 三特征（RoPE + RMSNorm + SwiGLU/GatedMLP）的模型一律走 Template G（见 09 §5.1.20），**不得**默认回退至 Template A（原则 10）。
 
 ---
 
 ## [v1.1+ PARKING] §5.2.11 `services/parallel/` — 并行策略模块
 
-> 对应 v1.0 范围：09 仅保留 `ParallelismStrategy` 接口定义 + 空 registry（参见 09 §5.1.15）。以下为原全文。
+> 对应 v1.0 范围：09 **不保留** `ParallelismStrategy` 接口与 registry（参见 11 §4）。以下为 v1.2+ 预研草案。
 
 | 文件 | 职责 |
 |------|------|
@@ -178,7 +178,7 @@ ScheduleStep = NamedTuple('ScheduleStep', [
     ('stage_id', int),
     ('micro_batch_id', int),
     ('action', Literal['F', 'B', 'W', 'IDLE']),
-    ('gpu_id', int),
+    ('gpu_rank', int),  # 注意：v1.1+ 并行调度中的 GPU 物理 rank；与 v1.0 白名单字段 `gpu_id`（GPU spec ID, string）为不同概念
     ('time_slot', int),
 ])
 
@@ -268,7 +268,7 @@ class LayoutPair(BaseModel):
 
 ## [v1.1+ PARKING] §7.5 并行策略接口
 
-> v1.0 冻结范围：`GET /api/v1/parallelism-strategies` 返回空数组（见 04 §4.9.4）；具体并行计算端点推迟至 v2.0。
+> v1.0 冻结范围：`GET /api/v1/parallelism-strategies` 返回空数组（见 04 §4.9.4）；具体并行计算端点推迟至 v1.2+。
 
 **`GET /api/v1/models/{repo_id:path}/parallel`**
 
@@ -331,7 +331,7 @@ class CommOp(BaseModel):
     end_ms: float
 
 class ScheduleStep(BaseModel):
-    gpu_id: int
+    gpu_rank: int  # v1.1+ 并行调度 GPU 物理 rank；与 v1.0 白名单 `gpu_id`（spec ID, string）为不同概念
     time_slot: int
     start_ms: float
     end_ms: float
@@ -344,50 +344,11 @@ class ScheduleStep(BaseModel):
 
 ---
 
-## [v1.1+ PARKING] §7.11 Rate Limiting 参考设计
+## [v1.1+ PARKING] §7.11 Rate Limiting（冻结说明）
 
-> **原则 1（非商业化、内部工具）对齐**：v1.0 **不启用** rate limiting（不做匿名限流、不做 per-IP 计数、不引入 slowapi）。对应错误码 `RATE_LIMITED` 在 v1.0 **不产出**（参见 04 §4.12）。以下内容保留为 v1.1+ 参考设计，实现时机视是否开放公网而定。
-
-```
-策略:
-  全局 SSE 连接:         50 并发（BoundedSSESemaphore）
-  单 IP SSE 连接:        5 并发（per-IP counter）
-  Compare 接口:          10 req/min per IP
-  Explore 接口:          30 req/min per IP
-  Cache DELETE:          5 req/min per API key
-
-实现:
-  SSE:     BoundedSSESemaphore (in-process, 预留 Redis-backed 接口)
-  REST:    slowapi + 统一错误处理器
-
-标准响应头（所有受限接口每个响应携带）:
-  X-RateLimit-Limit: 10
-  X-RateLimit-Remaining: 7
-  X-RateLimit-Reset: 1714000060       # Unix timestamp
-
-429 响应:
-  Retry-After: <seconds>
-  {
-    "error": {
-      "code": "RATE_LIMITED",
-      "message": "Rate limit exceeded",
-      "details": { "limit": "10/min", "retry_after": "30" },
-      "request_id": "req-uuid"
-    }
-  }
-
-统一 slowapi 错误格式:
-  @app.exception_handler(RateLimitExceeded)
-  async def rate_limit_handler(request, exc):
-      return JSONResponse(
-          status_code=429,
-          content=ErrorResponse(error=ErrorDetail(
-              code="RATE_LIMITED",
-              message=str(exc.detail),
-          )).model_dump(),
-          headers={"Retry-After": str(exc.retry_after)},
-      )
-```
+> 对齐原则 1（非商业化、内部工具）：Rate Limiting 在当前产品定位下**不进入路线图**。
+>
+> 本节仅保留冻结声明，不提供具体限额与实现细节；只有当产品定位发生变更（例如开放公网）并完成原则变更评审后，才允许重新引入独立设计文档。
 
 ---
 

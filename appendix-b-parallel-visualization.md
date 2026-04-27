@@ -1,8 +1,12 @@
-# 并行策略可视化设计（v1.2）
+# 并行策略可视化设计（v1.2+）
 
-> 本文档从主设计文档 `serialized-seeking-clock.md` 提取。
+> **⚠ 范围声明**：本文档为 v1.2+ 并行策略可视化的**设计预研草稿**，不属于 v1.0 交付范围。v1.0 不建 `ParallelismStrategy` 接口/Registry/目录（见 11 §4 / ADR-020）。本文档中的具体实现细节（通信原语可视化、GPU 拓扑布局等）在 v1.2 正式启动时需重新评审后方可采纳。
+
+> **本文件不属于 v1.0 交付范围**，为 v1.2+ 并行策略可视化的概念草案，供未来迭代参考。
+
+> 本文档从原始内部设计稿提取。
 > 包含 TP/PP/DP/EP/CP/SP 并行策略的 3D 可视化设计、训练数据流设计。
-> 计划在 v1.2 实现。
+> 计划在 v1.2+ 实现。
 
 ---
 
@@ -27,7 +31,7 @@
 ┌──────────────────────────────────────────────────────┐
 │  ⚙️  并行策略配置                                      │
 │                                                        │
-│  模型: moonshotai/Kimi-K2.6 (61 层, 384 专家)          │
+│  模型: deepseek-ai/DeepSeek-V3 (61 层, 256 专家)          │
 │  总 GPU 数: [  64  ] = TP × PP × DP × CP              │
 │                                                        │
 │  ┌──── 基础并行 ──────────────────────────────────┐    │
@@ -145,9 +149,9 @@ VPP (Interleaved) 对比:
 #### EP (Expert Parallelism) 数据流
 
 ```
-━━━ MoE + EP 数据流（Kimi-K2.6: 384 专家, EP=8）━━━
+━━━ MoE + EP 数据流（DeepSeek-V3: 256 专家, EP=8）━━━
 
-每个 EP rank 持有 384/8 = 48 个专家:
+每个 EP rank 持有 256/8 = 32 个专家:
 
   Router: 所有 rank 本地计算路由评分
   │
@@ -158,7 +162,7 @@ VPP (Interleaved) 对比:
   │    连线粗细 = 传输 token 数量
   │
   ├─ Expert Compute:
-  │    每个 rank 本地计算其 48 个专家
+  │    每个 rank 本地计算其 32 个专家
   │    动画: MoE 网格中属于当前 rank 的专家发光
   │    不同 rank 的专家用不同底色标记
   │
@@ -167,9 +171,9 @@ VPP (Interleaved) 对比:
        动画: 粒子从专家 GPU 飞回源 GPU
 
 3D 可视化:
-  - MoE 专家网格(24×16) 按 EP 分组着色:
-    rank 0: 行 0-5 (蓝)  rank 1: 行 6-11 (绿)
-    rank 2: 行 12-17 (橙)  rank 3: 行 18-23 (紫)
+  - MoE 专家网格(16×16) 按 EP 分组着色:
+    rank 0: 行 0-1 (蓝)  rank 1: 行 2-3 (绿)
+    rank 2: 行 4-5 (橙)  rank 3: 行 6-7 (紫)
     ...
   - All-to-All 通信: 8×8 GPU 间的橙色网状连线
   - Token 流动: 粒子从 Router → 散向各 EP rank → 回收
@@ -247,12 +251,11 @@ def validate_parallel_flow(config: dict, parallel_config: ParallelConfig) -> Val
     assert config.get("num_key_value_heads", config["num_attention_heads"]) % parallel_config.tp_size == 0
     assert config["intermediate_size"] % parallel_config.tp_size == 0
 
-    # 2. 验证 PP 切分: 层数必须能被 pp_size 整除（考虑 VPP）
+    # 2. 验证 PP 切分: 层数能被 pp_size 整除时均分，否则末级 stage 多分 1 层
     num_layers = config["num_hidden_layers"]
     if parallel_config.vpp_size:
         assert num_layers % (parallel_config.pp_size * parallel_config.vpp_size) == 0
-    else:
-        assert num_layers % parallel_config.pp_size == 0
+    # 注: DeepSeek-V3 61 层 PP=4 时不可均分（61 % 4 != 0），实际采用 15/15/15/16 非均匀切分
 
     # 3. 验证 EP 切分: 专家数必须能被 ep_size 整除
     if config.get("n_routed_experts"):
@@ -274,7 +277,7 @@ def validate_parallel_flow(config: dict, parallel_config: ParallelConfig) -> Val
 │                                                            │
 │  TP (AllReduce ×2):                                        │
 │  ████████████████████████  2 × 2 × s × h bytes             │
-│  = 2 × 2 × 8192 × 7168 × 2 (bf16) = 469 MB               │
+│  = 2 × 2 × 8192 × 7168 × 2 (bf16) ≈ 450 MB               │
 │                                                            │
 │  SP (ReduceScatter + AllGather ×2, 替代 AllReduce):        │
 │  ████████████████████████  通信量同 TP，但分两步             │
@@ -300,7 +303,7 @@ def validate_parallel_flow(config: dict, parallel_config: ParallelConfig) -> Val
 当用户同时选择多种并行策略时，展示组合效果：
 
 ```
-TP=8 + PP=4 + EP=8 + SP 组合 (Kimi-K2.6 推荐部署):
+TP=8 + PP=4 + EP=8 + SP 组合 (DeepSeek-V3 推荐部署):
 
   PP Stage 0 (Layer 0-14)                PP Stage 1 (Layer 15-29)
   ┌─────────────────────────────┐       ┌─────────────────────────────┐
@@ -489,7 +492,7 @@ TP=8 + PP=4 + EP=8 + SP 组合 (Kimi-K2.6 推荐部署):
 ━━━ Interleaved 1F1B (VPP=2) 对比 ━━━
 
   同一 GPU 上有两种颜色深度的块（对应两个虚拟阶段）
-  气泡占比从 27.3% 降到 ~13.6%
+  气泡占比从 27.3% 降到 ~15.8%（(P-1)/(M×v+P-1) = 3/19）
   动画: 并排播放两种调度，直观对比气泡缩减
 ```
 

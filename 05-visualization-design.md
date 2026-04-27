@@ -2,7 +2,7 @@
 
 > **v1.0 范围**：纯 3D 模式（含 WebGL 不可用时的文字 Fallback）。**2D SVG 模式整节已删除**，移至 v1.1+（见本文件末尾 TODO）。
 >
-> **对齐产品原则**：2（精美 3D 风格）/ 3（结构与数据流 100% 正确）/ 4（教学深度与动画精细度超越竞品）/ 5（前期不做性能优化，交互响应除外）/ 6（AnimationLayer 插件式叠加）/ 7（真实模型优先）/ 8（Template A/B/C/G 架构广度底线）/ 9（Provenance 强制展示）。
+> **对齐产品原则**：2（精美 3D 风格）/ 3（结构与数据流 100% 正确）/ 6（教学深度与动画精细度超越竞品）/ 7（前期不做性能优化，交互响应除外）/ 8（v1.0 架构最健壮且可扩展）/ 9（真实模型优先）/ 10（Template A/B/C/G 架构广度底线）/ 11（Provenance 强制展示）。
 >
 > **契约权威**：AnimationLayer 四层分工以 [11-extension-points.md §3](11-extension-points.md) 为准，本文件是其视觉落地。
 
@@ -25,10 +25,10 @@
   - [排版](#排版)
   - [相机](#相机)
   - [动效缓动](#动效缓动)
-- [5.5 Template A/B/C/G 视觉设计（对齐原则 8）](#55-template-abcg-视觉设计对齐原则-8)
-- [5.6 Provenance 徽标规范（对齐原则 9）](#56-provenance-徽标规范对齐原则-9)
-- [5.7 Config 编辑器 UI 规范（对齐原则 6 PATCH /config）](#57-config-编辑器-ui-规范对齐原则-6-patch-config)
-- [5.8 GPU 选择器 UI 规范（对齐原则 6 GPU Catalog）](#58-gpu-选择器-ui-规范对齐原则-6-gpu-catalog)
+- [5.5 Template A/B/C/G 视觉设计（对齐原则 10）](#55-template-abcg-视觉设计对齐原则-10)
+- [5.6 Provenance 徽标规范（对齐原则 11）](#56-provenance-徽标规范对齐原则-11)
+- [5.7 Config 编辑器 UI 规范（对齐原则 8 PATCH /config）](#57-config-编辑器-ui-规范对齐原则-8-patch-config)
+- [5.8 GPU 选择器 UI 规范（对齐原则 8 GPU Catalog）](#58-gpu-选择器-ui-规范对齐原则-8-gpu-catalog)
 - [5.9 交互设计](#59-交互设计)
 - [5.10 WebGL 不可用 Fallback](#510-webgl-不可用-fallback)
 - [5.11 v1.1+ TODO（本文件范围内）](#511-v11-todo本文件范围内)
@@ -41,7 +41,7 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │  顶部工具栏                                                        │
 │  [🔍 搜索] [🧊 Template A/B/C/G 指示]                              │
-│  [⚡ GPU: A100-80G ▼] [▶ Guided Tour] [⚙ Animation Layers]        │
+│  [⚡ GPU: A100-80G ▼] [⚙ Animation Layers]                        │
 │                                                                    │
 │  ┌───────────────────────────────────┬────────────────────────┐  │
 │  │                                     │  右侧浮动面板          │  │
@@ -57,13 +57,13 @@
 │  ┌──────────────────────────────────────────────────────────────┐│
 │  │  AnimationLayer 时间轴                                         ││
 │  │  [L1 Structure  ▢]  [L2 DataFlow  ▢]                          ││
-│  │  [L3 Heatmap v1.1 🔒]  [L4 Parallelism v1.2 🔒]               ││
+│  │  （v1.0 不展示 L3/L4 入口）                                   ││
 │  │  ◀ ⏸ ▶  ───●──────────────── 1:30 / 5:00  [1x]                ││
 │  └──────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**空间隐喻（以 `meta-llama/Llama-3-8B` 32 层解码器为例）**：
+**空间隐喻（以 `meta-llama/Meta-Llama-3-8B` 32 层解码器为例）**：
 
 ```
   Y 轴向下 = 推理方向（token 从上到下穿越）
@@ -90,10 +90,10 @@
   └──────────────┘
 
   真实模型示例（v1.0 必须全部跑通）:
-    - meta-llama/Llama-3-8B          → Template A
+    - meta-llama/Meta-Llama-3-8B          → Template A
     - mistralai/Mixtral-8x7B         → Template B（8 experts, top-2）
     - deepseek-ai/DeepSeek-V3        → Template C（MLA + 256 experts + shared）
-    - 任何未识别的 *ForCausalLM      → Template G（通用回退 + INFERRED 徽标）
+    - 不匹配任何已注册 Adapter     → Template G（通用回退 + INFERRED 徽标）
 ```
 
 ---
@@ -111,19 +111,21 @@
 | **L3** | NumericalHeatmap | v1.1 | Attention 权重热力、激活值分布 | L1 + L2 |
 | **L4** | ParallelismAnimation | v1.2 | TP / PP / DP / EP / CP / SP 通信原语 | L1 + L2 |
 
-### 5.2.2 前端 UI（强制要求）
+### 5.2.2 前端 UI（v1.0 最小交付）
 
-- 工具栏底部 / 时间轴上方必须提供四层**独立开关**（toggle）+ **独立时间轴进度条**。
-- L3 / L4 在 v1.0 显示为 🔒 灰态（hover 提示"v1.1/v1.2 交付"）。
-- 开关触发后，`AnimationContext.timeline` 重编排，不重建场景。
-- 同屏多层同时启用时，**时间轴共享**（master timeline），各层通过 `(startTime, duration, targetNodeId, tween)` 元组声明自身片段。
+- v1.0 工具栏仅提供 **L1/L2 两层开关** + **单一共享时间轴**（不展示 L3/L4 锁态入口）。
+- L1/L2 开关触发后，`AnimationContext.timeline` 重编排，不重建场景。
+- 同屏多层（仅 L1+L2）启用时，时间轴共享（master timeline），各层通过 `(startTime, duration, targetNodeId, tween)` 声明片段。
+- L3/L4 的 UI 入口与独立进度条延后到 v1.1+/v1.2+，避免 v1.0 提前引入空壳交互。
 
 ### 5.2.3 AnimationContext 共享时间轴（TS 草案）
+
+> **注**：此处为视觉设计维度的概念草案；正式 TypeScript 类型定义以 [10-frontend-type-contracts.md §10.10](10-frontend-type-contracts.md) 为准。
 
 ```typescript
 interface AnimationContext {
   master: gsap.core.Timeline;      // 全局主时间轴
-  layers: Record<'L1_structure' | 'L2_dataflow' | 'L3_heatmap' | 'L4_parallelism',
+  layers: Record<'L1_structure' | 'L2_dataflow',
                  { enabled: boolean; sub: gsap.core.Timeline }>;
   graph: ModuleGraph;              // 当前 ModuleGraph（PATCH /config 后重新注入）
   now: number;                     // 秒
@@ -138,7 +140,7 @@ interface AnimationContext {
 
 ## 5.3 v1.0 Stage-2 数据流动画（三项最终范围）
 
-> **最终决议（对齐原则 4：教学深度与动画精细度大幅超越竞品）**：
+> **最终决议（对齐原则 6：教学深度与动画精细度大幅超越竞品）**：
 >
 > 原先被移至 v1.1 的 Stage-2 三项核心动画，**全部拉回 v1.0 必交付范围**：
 > 1. **Attention Q/K/V 分解**
@@ -149,7 +151,7 @@ interface AnimationContext {
 
 ### ① Attention Q/K/V 分解动画
 
-> 演示模型：`meta-llama/Llama-3-8B`（32 heads, hidden=4096, head_dim=128）
+> 演示模型：`meta-llama/Meta-Llama-3-8B`（32 heads, hidden=4096, head_dim=128）
 
 展示完整计算链，**一镜到底**：
 
@@ -341,20 +343,20 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 
 ---
 
-## 5.5 Template A/B/C/G 视觉设计（对齐原则 8）
+## 5.5 Template A/B/C/G 视觉设计（对齐原则 10）
 
 | 模板 | 目标模型族 | 3D 视觉结构 | Provenance |
 |---|---|---|---|
-| **A** | `meta-llama/Llama-3-8B` / `Qwen/Qwen2.5-7B`（LLaMA 族 Decoder） | 垂直堆叠 Decoder Block × N；每 Block 内 **Attention（左）∥ MLP（右）** 并列，residual 主干居中 | EXACT（全部字段来自 config + safetensors） |
+| **A** | `meta-llama/Meta-Llama-3-8B` / `Qwen/Qwen2.5-7B`（LLaMA 族 Decoder） | 垂直堆叠 Decoder Block × N；每 Block 内 **Attention（左）∥ MLP（右）** 并列，residual 主干居中 | EXACT（全部字段来自 config + safetensors） |
 | **B** | `mistralai/Mixtral-8x7B`（LLaMA-MoE） | 在 A 的基础上 **MLP → MoE 扇形展开**：Gate 位于分支入口，N 个 Expert 围绕 Gate 呈扇形排列（Mixtral=8，呈半圆；更多 experts 使用径向网格） | EXACT |
 | **C** | `deepseek-ai/DeepSeek-V3`（DeepSeek-MoE） | 在 B 的基础上新增三项：<br>• **MLA 压缩头**：Attention 区显示双锥漏斗（q_lora / kv_lora 压缩维度可视化）<br>• **Shared Expert**：独立大块，位于 Routed Experts 扇形**外侧**，始终激活（emissive 常亮）<br>• **Routed Experts 分组**：按 expert_group 着色微差（同组同色深浅） | EXACT |
-| **G** | 通用回退（任何未识别 `*ForCausalLM`） | • 仅展示 **config 已知字段**对应节点（num_layers / hidden_size / vocab_size / num_heads 若存在）<br>• 通用 Decoder 骨架（Embedding → N × Block → Norm → LM Head）<br>• **醒目全局 `INFERRED` 徽标**（右上角大号）<br>• **免责浮层**：顶部条幅："⚠ 该架构未识别，仅基于 config 字段推断" —— 点击关闭后仍保留徽标 | INFERRED |
+| **G** | 通用回退（不匹配任何已注册 Adapter） | • 仅展示 **config 已知字段**对应节点（num_layers / hidden_size / vocab_size / num_heads 若存在）<br>• 通用 Decoder 骨架（Embedding → N × Block → Norm → LM Head）<br>• **醒目全局 `INFERRED` 徽标**（右上角大号）<br>• **免责浮层**：顶部条幅："⚠ 该架构未识别，仅基于 config 字段推断" —— 点击关闭后仍保留徽标 | INFERRED |
 
 **切换策略**：`ArchitectureAdapter.detect()` 判定返回 `template_id`，前端 `TemplateContract.canRender()` 匹配后挂载对应 `<Scene>`。Template G 永远兜底，**禁止**默认回退到 A 伪装 LLaMA。
 
 ---
 
-## 5.6 Provenance 徽标规范（对齐原则 9）
+## 5.6 Provenance 徽标规范（对齐原则 11）
 
 ### 5.6.1 节点级徽标
 
@@ -388,18 +390,21 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 │  Template: C (DeepSeek-V3)              │
 │  ● EXACT:     142 nodes                  │
 │  ○ INFERRED:  3 nodes                    │
-│  ▲ ESTIMATED: 2 fields (activations,    │
-│                         kv_cache)       │
+│  ▲ ESTIMATED: 2 fields                   │
+│    · activations_bytes (memory_estimator)│
+│    · kv_cache_bytes    (memory_estimator)│
 │  Source: config.json + safetensors      │
 │  Revision: 1                             │
 └─────────────────────────────────────────┘
 ```
 
+> **字段级追溯（原则 11 强制）**：ESTIMATED 行**必须逐字段列出字段名 + 估算来源**（如 `memory_estimator`），不得仅给聚合计数。点击字段名跳转到对应节点的 Provenance Tooltip。
+
 **禁止**：任何"估算即展示，不标来源"的设计。凡是屏幕上的数字/箭头/结构，必须能追溯。
 
 ---
 
-## 5.7 Config 编辑器 UI 规范（对齐原则 6 PATCH /config）
+## 5.7 Config 编辑器 UI 规范（对齐原则 8 PATCH /config）
 
 ```
 ┌─ Config Editor (浮动右侧) ──────────────────────┐
@@ -419,9 +424,6 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 │  num_experts_per_tok       8   → 8               │
 │    [input number]                                 │
 │                                                  │
-│  moe_top_k                 8   → 8               │
-│    ...                                            │
-│                                                  │
 │  [⟲ Reset to original config]                     │
 └──────────────────────────────────────────────────┘
 ```
@@ -429,7 +431,7 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 **行为约束**：
 
 1. 字段变化 → **300ms debounce** → `PATCH /api/v1/stream/{org}/{repo}/config`。
-2. 请求中显示 **loading spinner**（玫瑰金色旋转环）；端到端必须 **< 300ms**（原则 5 例外条款硬约束）。
+2. 请求中显示 **loading spinner**（玫瑰金色旋转环）；端到端必须 **< 300ms**（原则 7 例外条款硬约束）。
 3. 每个字段旁显示 **"原值 → 当前值"**；当前值与原值不同时以玫瑰金强调色高亮。
 4. **Reset 按钮**恢复到原 config（触发一次 PATCH，overrides=空）。
 5. 白名单字段严格对齐 [11-extension-points.md §8.1](11-extension-points.md)。
@@ -440,7 +442,7 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 
 ---
 
-## 5.8 GPU 选择器 UI 规范（对齐原则 6 GPU Catalog）
+## 5.8 GPU 选择器 UI 规范（对齐原则 8 GPU Catalog）
 
 ```
 ┌─ GPU Selector (顶部工具栏下拉) ────────────────────────────┐
@@ -455,8 +457,8 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 │    H100-80G   (80GB,  3.4TB/s, 989 TFLOPS BF16)            │
 │    H200-141G  (141GB, 4.8TB/s, 989 TFLOPS BF16)            │
 │    B200       (192GB, 8.0TB/s, 2250 TFLOPS BF16)           │
-│    4090-24G   (24GB,  1.0TB/s, 165 TFLOPS BF16)            │
-│    3090-24G   (24GB,  0.9TB/s, 71 TFLOPS BF16)             │
+│    RTX 4090-24G   (24GB,  1.0TB/s, 165 TFLOPS BF16)            │
+│    RTX 3090-24G   (24GB,  0.9TB/s, 71 TFLOPS BF16)             │
 │    L40S-48G   (48GB,  0.9TB/s, 362 TFLOPS BF16)            │
 │  国产                                                        │
 │    昇腾 910B  (64GB,  ...)                                  │
@@ -485,26 +487,26 @@ UI 字体:        系统级无衬线 (ui-sans-serif, -apple-system, "Inter" fall
 | 点击 MoE 块 | 展开 Expert 扇形（Mixtral 8 / DeepSeek-V3 256） |
 | 点击单个专家 | 信息面板滑入显示 expert 参数 + Provenance |
 | 点击徽标 | Tooltip 显示 source / caveats |
-| 播放按钮 | Guided Tour：相机飞越 + L2 数据流动画自动串联播放 |
+| 播放按钮 | 播放/暂停当前 L1+L2 时间轴 |
 | 时间轴 scrub | 16ms/frame 重绘；支持跳到任意步骤 |
-| AnimationLayer 开关 | 独立 toggle L1/L2；L3/L4 锁定态（v1.1/v1.2） |
+| AnimationLayer 开关 | 独立 toggle L1/L2（v1.0 不展示 L3/L4 入口） |
 
 ---
 
 ## 5.10 WebGL 不可用 Fallback
 
-> **原则 5 例外**：本节不是"性能降级"（已按产品原则删除 LOD 降级设计），而是 WebGL 完全不可用时的**底线可访问性**。
+> **原则 7 例外**：本节不是"性能降级"（已按产品原则删除 LOD 降级设计），而是 WebGL 完全不可用时的**底线可访问性**。
 
 ```
 if (!document.createElement('canvas').getContext('webgl2')) {
-  → 渲染 ASCII 结构树 + Markdown 参数表（零 JS 依赖）
+  → 渲染 ASCII 结构树 + Markdown 参数表（轻量 JS 模式）
   → 顶部条幅："您的浏览器不支持 WebGL2。请升级至 Chrome/Edge 最新版"
-  → 仍可正常调用 PATCH /config 编辑与查看 Provenance Summary
+  → 保留 PATCH /config 编辑与 Provenance Summary 展示（通过普通表单交互）
 }
 ```
 
 **已删除**：
-- ~~Level 0/1/2/3 多档 LOD 降级~~（原则 5：前期不做性能优化）
+- ~~Level 0/1/2/3 多档 LOD 降级~~（原则 7：前期不做性能优化）
 - ~~GPU 性能检测自动降级~~
 - ~~低端机"简化 3D"模式~~
 - ~~Mac 集成 GPU 默认/高端 GPU 自动升级双档材质~~ → v1.0 统一 `MeshStandardMaterial(roughness=0.3, metalness=0.6)`。
@@ -513,37 +515,20 @@ if (!document.createElement('canvas').getContext('webgl2')) {
 
 ## 5.11 v1.1+ TODO（本文件范围内）
 
-> 以下章节在本次修订中**已删除**，待相应版本回填。
-
-- [ ] **TODO v1.1**：2D SVG 模式（dagre 布局、SVG 6 层、节点/边/数据流动画、SVG 导出、分屏对比、弹出层窗口、边叠加层） —— 整节移出。
-- [ ] **TODO v1.1**：L3 NumericalHeatmap 动画层（Attention 权重热力、激活值分布 2D 面板）。
-- [ ] **TODO v1.1**：Stage-2 细粒度动画（脉动 / 膨胀 / 螺旋 / RoPE 旋转 / token residual 细粒度）。
-- [ ] **TODO v1.1**：反向传播动画（`DataFlowDirection.backward` + forward/backward split-screen）。
-- [ ] **TODO v1.2**：L4 ParallelismAnimation（TP / PP / DP / EP / CP / SP + 通信原语 AllReduce / AllGather / ReduceScatter / All2All / P2P）。
-- [ ] **TODO v1.2**：2D↔3D 切换过渡动画。
-- [ ] **TODO v1.2**：模型对比分屏（两个真实 HF 模型并排）。
+> v1.0 范围冻结及 v1.1+ 可视化待办，参见 [06-implementation-phases.md §v1.0 范围冻结](06-implementation-phases.md) 为唯一事实源。
 
 ---
 
-## 5.12 前端错误处理规范（对齐 04 ProblemDetails + 10 ErrorCode）
+## 5.12 前端错误处理规范（v1.0 最小集）
 
-> 对齐原则 3 "结构正确" + 原则 9 "可追溯"：错误不能静默，必须让用户理解发生了什么以及下一步可做什么。
+> 对齐原则 3（结构正确）+ 原则 11（可追溯）：v1.0 采用最小但可诊断的错误交互，不在主线引入重型错误页系统。
 
-| ErrorCode | HTTP | 场景 | UI 形态 | 用户下一步 |
-|---|---|---|---|---|
-| `MODEL_NOT_FOUND` | 404 | 模型 repo 不存在或拼写错 | **全屏错误页**：大图标 + "未找到 {repo_id}"；副标题显示 `problem.detail`；底部三个按钮：返回首页 / 查看示例模型 / 报告问题 | 改输入重新导航 |
-| `HUB_UNAVAILABLE` | 503 | HF Hub 网络失败 / 超时 | **顶部红色 Banner**（不替换主场景）+ 显示"已缓存版本"按钮；若无缓存 → 全屏错误页 | 点击"重试"（5s 冷却） / 切离线 fixture 提示 |
-| `META_LOAD_TIMEOUT` | 504 | meta-device 加载超时（通常 > 30s） | **全屏错误页** + "降级为合成图"按钮；Provenance 徽标切换为 INFERRED | 降级继续（合成图可渲染结构） / 重试真实加载 |
-| `TRUST_REMOTE_CODE_BLOCKED` | 422 | 模型含 auto_map 且 trust_remote_code=False | **顶部黄色 Banner**（场景已渲染 Template G 合成图）+ caveats 显示"自定义代码已拒绝，图为 config 推断" | 用户可接受降级继续浏览 |
-| `SCHEMA_VALIDATION_FAILED` | 500 | 后端产出不符 Pydantic 契约 | **全屏错误页** + 折叠区显示 `problem.detail` 与 traceId | 上报 issue（一键拷贝 traceId） |
-| `SESSION_EXPIRED` | 410 | SSE/WS session 超时（§4.7.1） | **Toast** "会话已过期，正在重建…" 自动重发 GET /stream；失败则升级全屏错误 | 无需操作（自动恢复） |
-| `RATE_LIMITED` | 429 | v1.0 不启用，仅占位 | — | — |
+- `MODEL_NOT_FOUND` / `SCHEMA_VALIDATION_FAILED`：展示简版全屏错误页（标题 + `problem.detail` + 返回首页 + 复制 `problem.instance`）。
+- `HUB_UNAVAILABLE` / `TRUST_REMOTE_CODE_BLOCKED`：展示顶部 Banner，不替换主场景；可继续浏览缓存或 Template G。
+- `SESSION_EXPIRED`：Toast 提示并自动重连一次，失败后升级为简版全屏错误页。
+- 全局规则：错误信息不静默；UI 样式遵循 §5.4；`problem.instance`（请求追踪 ID）一律可复制。
 
-**通用规则**：
-- 所有错误页顶部固定显示 `traceId` 的末 8 位（后端必在响应头 `X-Trace-Id` 返回）+ 一键拷贝，方便上报
-- 错误页配色参照 §5.4（深色背景 + 玫瑰金辅助色），不因错误破坏精美感（对齐原则 2）
-- Toast 最多同时 3 个，多余进队列；Toast 默认 5s，含"详情"按钮可展开
-- 全屏错误页**必须**提供"返回首页"按钮（防止用户卡死）
+> 更细粒度的错误页编排（多按钮流程、分场景布局）迁移到 v1.1+ parking，避免占用 v1.0 主线实现预算。
 
 ---
 
